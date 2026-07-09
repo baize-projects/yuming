@@ -36,6 +36,9 @@ jobs:
       - name: Run numeric scanner
         env:
           SCAN_CONCURRENCY: ${{ vars.SCAN_CONCURRENCY }}
+          ICP_CONCURRENCY: ${{ vars.ICP_CONCURRENCY }}
+          ICP_TIMEOUT: ${{ vars.ICP_TIMEOUT }}
+          ICP_RETRIES: ${{ vars.ICP_RETRIES }}
           SCAN_BATCH_SIZE: ${{ vars.SCAN_BATCH_SIZE }}
           SCAN_BATCH_DELAY: ${{ vars.SCAN_BATCH_DELAY }}
           RDAP_TIMEOUT: ${{ vars.RDAP_TIMEOUT }}
@@ -49,10 +52,13 @@ jobs:
             --limit 200000 \
             --target unregistered-with-icp \
             --concurrency "${SCAN_CONCURRENCY:-32}" \
+            --icp-concurrency "${ICP_CONCURRENCY:-2}" \
             --batch-size "${SCAN_BATCH_SIZE:-64}" \
             --delay "${SCAN_BATCH_DELAY:-0.1}" \
             --timeout 20 \
             --retries 1 \
+            --icp-timeout "${ICP_TIMEOUT:-10}" \
+            --icp-retries "${ICP_RETRIES:-0}" \
             --rdap-timeout "${RDAP_TIMEOUT:-5}" \
             --rdap-retries "${RDAP_RETRIES:-0}" \
             --max-runtime-seconds 3600 \

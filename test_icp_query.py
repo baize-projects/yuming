@@ -101,6 +101,9 @@ class IcpQueryTests(unittest.TestCase):
                 limit=3,
                 concurrency=2,
                 batch_size=2,
+                icp_concurrency=1,
+                icp_timeout=3,
+                icp_retries=0,
                 timeout=1,
                 retries=0,
                 delay=0,
@@ -138,6 +141,9 @@ class IcpQueryTests(unittest.TestCase):
             self.assertEqual(state["last_domain"], "0000.top")
             self.assertEqual(state["scanned_domains_total"], 3)
             self.assertEqual(state["concurrency"], 2)
+            self.assertEqual(state["icp_concurrency"], 1)
+            self.assertEqual(state["icp_timeout"], 3)
+            self.assertEqual(state["icp_retries"], 0)
             self.assertEqual(state["batch_size"], 2)
 
     def test_empty_integer_env_values_fall_back_to_defaults(self):
@@ -146,6 +152,9 @@ class IcpQueryTests(unittest.TestCase):
             {
                 "SCAN_CONCURRENCY": "",
                 "SCAN_BATCH_SIZE": "",
+                "ICP_CONCURRENCY": "",
+                "ICP_TIMEOUT": "",
+                "ICP_RETRIES": "",
                 "APICN_PAGE_SIZE": "",
                 "RDAP_TIMEOUT": "",
                 "RDAP_RETRIES": "",
@@ -157,6 +166,9 @@ class IcpQueryTests(unittest.TestCase):
 
         self.assertEqual(args.concurrency, 1)
         self.assertEqual(args.batch_size, 32)
+        self.assertEqual(args.icp_concurrency, 2)
+        self.assertEqual(args.icp_timeout, icp_query.DEFAULT_ICP_TIMEOUT)
+        self.assertEqual(args.icp_retries, icp_query.DEFAULT_ICP_RETRIES)
         self.assertEqual(args.apicn_page_size, icp_query.APICN_MAX_PAGE_SIZE)
         self.assertEqual(args.rdap_timeout, icp_query.DEFAULT_RDAP_TIMEOUT)
         self.assertEqual(args.rdap_retries, 0)
@@ -485,6 +497,38 @@ class IcpQueryTests(unittest.TestCase):
         self.assertEqual(result.status, "not_found")
         self.assertEqual(result.provider, "jyblog-api")
         self.assertEqual(result.error, "未找到备案信息")
+
+    def test_jyblog_api_beian_treats_524_as_transient_unknown(self):
+        with patch(
+            "icp_query.request_json_post",
+            side_effect=icp_query.requests.HTTPError("524 Server Error: Receive timeout from origin"),
+        ):
+            result = icp_query.query_jyblog_api_beian(
+                FakeSession([]),
+                "0623.top",
+                timeout=1,
+                retries=0,
+            )
+
+        self.assertEqual(result.status, "unknown")
+        self.assertEqual(result.provider, "jyblog-api")
+        self.assertIn("备案接口临时失败", result.error)
+
+    def test_jyblog_api_beian_treats_554_as_transient_unknown(self):
+        with patch(
+            "icp_query.request_json_post",
+            side_effect=icp_query.requests.HTTPError("554 Server Error: Receive Timeout From Mid Origin"),
+        ):
+            result = icp_query.query_jyblog_api_beian(
+                FakeSession([]),
+                "0623.top",
+                timeout=1,
+                retries=0,
+            )
+
+        self.assertEqual(result.status, "unknown")
+        self.assertEqual(result.provider, "jyblog-api")
+        self.assertIn("备案接口临时失败", result.error)
 
     def test_jyblog_whois_api_detects_registered_domain(self):
         result = icp_query.parse_jyblog_whois_api(

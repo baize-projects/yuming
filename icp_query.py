@@ -27,6 +27,8 @@ DEFAULT_OUTPUT = f"expired_icp_results_{datetime.now().strftime('%Y%m%d')}.json"
 DEFAULT_TIMEOUT = 15
 DEFAULT_DELAY = 1.5
 DEFAULT_RETRIES = 2
+DEFAULT_ICP_TIMEOUT = 10
+DEFAULT_ICP_RETRIES = 0
 DEFAULT_STATE_FILE = "scan_state.json"
 DEFAULT_MATCHES_FILE = "scan_matches.json"
 DEFAULT_APICN_STATE_FILE = "apicn_scan_state.json"
@@ -1221,8 +1223,15 @@ def query_jyblog_api_beian(
             break
         except (requests.RequestException, ProviderError) as exc:
             if attempt < retries:
-                time.sleep(2)
+                time.sleep(min(10, 2 + attempt * 2))
                 continue
+            if is_transient_provider_exception(exc):
+                return QueryResult(
+                    domain=domain,
+                    status="unknown",
+                    provider="jyblog-api",
+                    error=f"备案接口临时失败: {exc}",
+                )
             return QueryResult(
                 domain=domain,
                 status="error",
@@ -1340,6 +1349,20 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
+def is_transient_provider_exception(exc: Exception) -> bool:
+    text = str(exc)
+    return bool(re.search(r"\b5\d\d\b", text)) or any(
+        signal in text
+        for signal in (
+            "timed out",
+            "Read timed out",
+            "Receive timeout",
+            "Receive Timeout",
+            "Connection aborted",
+        )
+    )
+
+
 def batched(values: list[str], batch_size: int) -> Any:
     for start in range(0, len(values), batch_size):
         yield start, values[start : start + batch_size]
@@ -1360,29 +1383,33 @@ def query_unregistered_with_icp_target(
         rdap_fallback=False,
     )
 
+    def query_icp() -> QueryResult:
+        icp_timeout = getattr(args, "icp_timeout", args.timeout)
+        icp_retries = getattr(args, "icp_retries", args.retries)
+
+        def perform_query() -> QueryResult:
+            return query_domain(
+                session=session,
+                domain=domain,
+                provider=args.icp_provider,
+                apihz_url=apihz_url,
+                timeout=icp_timeout,
+                retries=max(icp_retries, 0),
+                api_id=args.apihz_id,
+                api_key=args.apihz_key,
+            )
+
+        semaphore = getattr(args, "_icp_semaphore", None)
+        if semaphore is None:
+            return perform_query()
+        with semaphore:
+            return perform_query()
+
     if whois_result.registered is False:
-        icp_result = query_domain(
-            session=session,
-            domain=domain,
-            provider=args.icp_provider,
-            apihz_url=apihz_url,
-            timeout=args.timeout,
-            retries=max(args.retries, 0),
-            api_id=args.apihz_id,
-            api_key=args.apihz_key,
-        )
+        icp_result = query_icp()
         return merge_unregistered_whois_and_icp(whois_result, icp_result)
     if should_fallback_to_rdap(whois_result):
-        icp_result = query_domain(
-            session=session,
-            domain=domain,
-            provider=args.icp_provider,
-            apihz_url=apihz_url,
-            timeout=args.timeout,
-            retries=max(args.retries, 0),
-            api_id=args.apihz_id,
-            api_key=args.apihz_key,
-        )
+        icp_result = query_icp()
         if icp_result.status != "found":
             return QueryResult(
                 domain=domain,
@@ -1476,6 +1503,9 @@ def write_generated_scan_state(
             "tlds": list(tlds),
             "limit": args.limit,
             "concurrency": args.concurrency,
+            "icp_concurrency": args.icp_concurrency,
+            "icp_timeout": getattr(args, "icp_timeout", args.timeout),
+            "icp_retries": getattr(args, "icp_retries", args.retries),
             "batch_size": args.batch_size,
             "scanned_domains_total": previous_scanned_total + run_scanned,
             "last_run_scanned": run_scanned,
@@ -1500,11 +1530,13 @@ def scan_generated_target_domains(
     stopped_by_runtime = False
     previous_scanned_total = int(scan_state.get("scanned_domains_total") or 0)
     concurrency = normalize_positive_int(args.concurrency, "concurrency")
+    icp_concurrency = normalize_positive_int(args.icp_concurrency, "icp-concurrency")
     batch_size = normalize_positive_int(args.batch_size, "batch-size")
     batch_size = max(batch_size, concurrency)
+    args._icp_semaphore = threading.BoundedSemaphore(icp_concurrency)
 
     print("WHOIS 查询接口: jyblog-whois-api")
-    print(f"并发数: {concurrency}，批大小: {batch_size}\n")
+    print(f"WHOIS 并发数: {concurrency}，备案并发数: {icp_concurrency}，批大小: {batch_size}\n")
 
     def record_result(index: int, domain: str, result: QueryResult) -> None:
         nonlocal run_scanned
@@ -2126,6 +2158,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="生成模式每批提交的域名数量，默认：32；会自动不小于 concurrency。",
     )
     parser.add_argument(
+        "--icp-concurrency",
+        type=int,
+        default=env_int("ICP_CONCURRENCY", 2),
+        help="生成模式备案补查接口并发数，默认：2。",
+    )
+    parser.add_argument(
         "--timeout",
         type=int,
         default=DEFAULT_TIMEOUT,
@@ -2136,6 +2174,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_RETRIES,
         help=f"遇到网络错误或频控时的重试次数，默认：{DEFAULT_RETRIES}",
+    )
+    parser.add_argument(
+        "--icp-timeout",
+        type=int,
+        default=env_int("ICP_TIMEOUT", DEFAULT_ICP_TIMEOUT),
+        help=f"备案补查接口单次请求超时秒数，默认：{DEFAULT_ICP_TIMEOUT}。",
+    )
+    parser.add_argument(
+        "--icp-retries",
+        type=int,
+        default=env_int("ICP_RETRIES", DEFAULT_ICP_RETRIES),
+        help=f"备案补查接口重试次数，默认：{DEFAULT_ICP_RETRIES}。",
     )
     parser.add_argument(
         "--rdap-timeout",
@@ -2444,23 +2494,15 @@ def main() -> int:
         if args.generate:
             last_domain = all_checked_results[-1].domain if all_checked_results else None
             if last_domain:
-                write_scan_state(
-                    args.state_file,
-                    {
-                        "mode": "generate",
-                        "target": args.target,
-                        "last_domain": last_domain,
-                        "last_label": domain_label(last_domain),
-                        "min_length": args.min_length,
-                        "max_length": args.max_length,
-                        "alphabet": generated_alphabet,
-                        "tlds": list(tlds),
-                        "limit": args.limit,
-                        "scanned_domains_total": previous_scanned_total + run_scanned,
-                        "last_run_scanned": run_scanned,
-                        "last_run_matched": len(matched_results),
-                        "stopped_by_runtime": stopped_by_runtime,
-                    },
+                write_generated_scan_state(
+                    args=args,
+                    domain=last_domain,
+                    generated_alphabet=generated_alphabet,
+                    tlds=tlds,
+                    previous_scanned_total=previous_scanned_total,
+                    run_scanned=run_scanned,
+                    matched_count=len(matched_results),
+                    stopped_by_runtime=stopped_by_runtime,
                 )
         write_results(
             args.output,

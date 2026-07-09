@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+expired_icp_results_*.json
+verify_icp_results.json
+verify_strict_exit.json
+verify_jyblog_results.json
+verify_jyblog_api_results.json
+target_unregistered_icp_results_*.json
+generated_scan_*.json

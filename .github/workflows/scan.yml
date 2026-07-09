@@ -1,0 +1,63 @@
+name: scan
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */3 * * *"
+    - cron: "30 1-23/3 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: yuming-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run scanner
+        run: |
+          python -u icp_query.py \
+            --generate \
+            --min-length 4 \
+            --max-length 4 \
+            --limit 200000 \
+            --target unregistered-with-icp \
+            --delay 0.5 \
+            --timeout 20 \
+            --retries 1 \
+            --max-runtime-seconds 3600 \
+            --state-file scan_state.json \
+            --matches-file scan_matches.json \
+            -o latest_run_matches.json
+
+      - name: Commit scan state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scan_state.json scan_matches.json latest_run_matches.json
+          if git diff --cached --quiet; then
+            echo "No scan changes to commit."
+          else
+            git commit -m "Update scan state"
+            git pull --rebase origin ${{ github.ref_name }}
+            git push origin HEAD:${{ github.ref_name }}
+          fi

@@ -7,7 +7,9 @@ import re
 import secrets
 import string
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -52,6 +54,7 @@ APICN_DEFAULT_START_DATE = "2024-01-01"
 
 TRANSIENT_ERROR_WORDS = ("重试", "频次", "限流", "错误", "超时")
 NO_RECORD_WORDS = ("没有备案", "无备案", "未备案", "未查询到备案")
+THREAD_LOCAL = threading.local()
 
 
 @dataclass
@@ -1280,6 +1283,182 @@ def create_http_session() -> requests.Session:
     return session
 
 
+def get_thread_session() -> requests.Session:
+    session = getattr(THREAD_LOCAL, "session", None)
+    if session is None:
+        session = create_http_session()
+        THREAD_LOCAL.session = session
+    return session
+
+
+def normalize_positive_int(value: int, name: str) -> int:
+    if value < 1:
+        raise ValueError(f"{name} 必须大于 0")
+    return value
+
+
+def batched(values: list[str], batch_size: int) -> Any:
+    for start in range(0, len(values), batch_size):
+        yield start, values[start : start + batch_size]
+
+
+def query_unregistered_with_icp_target(
+    domain: str,
+    args: argparse.Namespace,
+    apihz_url: str,
+    session: requests.Session | None = None,
+) -> QueryResult:
+    session = session or create_http_session()
+    whois_result = query_jyblog_api_whois(
+        session=session,
+        domain=domain,
+        timeout=args.timeout,
+        retries=max(args.retries, 0),
+    )
+
+    if whois_result.registered is False:
+        icp_result = query_domain(
+            session=session,
+            domain=domain,
+            provider=args.icp_provider,
+            apihz_url=apihz_url,
+            timeout=args.timeout,
+            retries=max(args.retries, 0),
+            api_id=args.apihz_id,
+            api_key=args.apihz_key,
+        )
+        return merge_unregistered_whois_and_icp(whois_result, icp_result)
+    if whois_result.status in {"error", "unknown"}:
+        return whois_result
+    return make_nonmatching_registered_result(whois_result)
+
+
+def write_generated_scan_state(
+    args: argparse.Namespace,
+    domain: str,
+    generated_alphabet: str,
+    tlds: tuple[str, ...],
+    previous_scanned_total: int,
+    run_scanned: int,
+    matched_count: int,
+    stopped_by_runtime: bool,
+) -> None:
+    write_scan_state(
+        args.state_file,
+        {
+            "mode": "generate",
+            "target": args.target,
+            "last_domain": domain,
+            "last_label": domain_label(domain),
+            "min_length": args.min_length,
+            "max_length": args.max_length,
+            "alphabet": generated_alphabet,
+            "tlds": list(tlds),
+            "limit": args.limit,
+            "concurrency": args.concurrency,
+            "batch_size": args.batch_size,
+            "scanned_domains_total": previous_scanned_total + run_scanned,
+            "last_run_scanned": run_scanned,
+            "last_run_matched": matched_count,
+            "stopped_by_runtime": stopped_by_runtime,
+        },
+    )
+
+
+def scan_generated_target_domains(
+    args: argparse.Namespace,
+    domains: list[str],
+    tlds: tuple[str, ...],
+    generated_alphabet: str,
+    apihz_url: str,
+    scan_state: dict[str, Any],
+    deadline: float | None,
+) -> tuple[list[QueryResult], list[QueryResult], int, bool]:
+    all_checked_results: list[QueryResult] = []
+    matched_results: list[QueryResult] = []
+    run_scanned = 0
+    stopped_by_runtime = False
+    previous_scanned_total = int(scan_state.get("scanned_domains_total") or 0)
+    concurrency = normalize_positive_int(args.concurrency, "concurrency")
+    batch_size = normalize_positive_int(args.batch_size, "batch-size")
+    batch_size = max(batch_size, concurrency)
+
+    print("WHOIS 查询接口: jyblog-whois-api")
+    print(f"并发数: {concurrency}，批大小: {batch_size}\n")
+
+    def record_result(index: int, domain: str, result: QueryResult) -> None:
+        nonlocal run_scanned
+        print(f"[{index}/{len(domains)}] 查询: {domain}")
+        all_checked_results.append(result)
+        if result.status == "found" and result.registered is False:
+            matched_results.append(result)
+        print_target_result(result)
+        run_scanned += 1
+        write_generated_scan_state(
+            args=args,
+            domain=domain,
+            generated_alphabet=generated_alphabet,
+            tlds=tlds,
+            previous_scanned_total=previous_scanned_total,
+            run_scanned=run_scanned,
+            matched_count=len(matched_results),
+            stopped_by_runtime=False,
+        )
+
+    if concurrency == 1:
+        session = create_http_session()
+        for index, domain in enumerate(domains, start=1):
+            if deadline and time.monotonic() >= deadline:
+                stopped_by_runtime = True
+                print("  -> 达到本次运行时间上限，保存状态后退出。")
+                break
+
+            result = query_unregistered_with_icp_target(
+                domain=domain,
+                args=args,
+                apihz_url=apihz_url,
+                session=session,
+            )
+            record_result(index, domain, result)
+
+            if index < len(domains) and args.delay > 0:
+                time.sleep(args.delay)
+        return all_checked_results, matched_results, run_scanned, stopped_by_runtime
+
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        def query_with_thread_session(domain: str) -> QueryResult:
+            return query_unregistered_with_icp_target(
+                domain=domain,
+                args=args,
+                apihz_url=apihz_url,
+                session=get_thread_session(),
+            )
+
+        for batch_start, batch_domains in batched(domains, batch_size):
+            if deadline and time.monotonic() >= deadline:
+                stopped_by_runtime = True
+                print("  -> 达到本次运行时间上限，保存状态后退出。")
+                break
+
+            futures = [
+                executor.submit(query_with_thread_session, domain)
+                for domain in batch_domains
+            ]
+            for offset, future in enumerate(futures):
+                domain = batch_domains[offset]
+                result = future.result()
+                record_result(batch_start + offset + 1, domain, result)
+
+            if deadline and time.monotonic() >= deadline:
+                stopped_by_runtime = True
+                print("  -> 达到本次运行时间上限，保存状态后退出。")
+                break
+            if batch_start + len(batch_domains) < len(domains) and args.delay > 0:
+                time.sleep(args.delay)
+
+    return all_checked_results, matched_results, run_scanned, stopped_by_runtime
+
+
 def make_nonmatching_registered_result(whois_result: QueryResult) -> QueryResult:
     return QueryResult(
         domain=whois_result.domain,
@@ -1812,7 +1991,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--delay",
         type=float,
         default=DEFAULT_DELAY,
-        help=f"每次查询后的等待秒数，默认：{DEFAULT_DELAY}",
+        help=f"每次查询后的等待秒数；并发生成模式下表示每批后的等待秒数，默认：{DEFAULT_DELAY}",
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=int(os.getenv("SCAN_CONCURRENCY", "1")),
+        help="生成模式并发线程数，默认：1。",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=int(os.getenv("SCAN_BATCH_SIZE", "32")),
+        help="生成模式每批提交的域名数量，默认：32；会自动不小于 concurrency。",
     )
     parser.add_argument(
         "--timeout",
@@ -2035,67 +2226,24 @@ def main() -> int:
                 print(f"历史备案候选拉取失败: {exc}")
                 return 1
         elif args.generate:
-            print("WHOIS 查询接口: jyblog-whois-api\n")
-            for index, domain in enumerate(domains, start=1):
-                if deadline and time.monotonic() >= deadline:
-                    stopped_by_runtime = True
-                    print("  -> 达到本次运行时间上限，保存状态后退出。")
-                    break
-
-                print(f"[{index}/{len(domains)}] 查询: {domain}")
-                whois_result = query_jyblog_api_whois(
-                    session=session,
-                    domain=domain,
-                    timeout=args.timeout,
-                    retries=max(args.retries, 0),
+            try:
+                (
+                    all_checked_results,
+                    matched_results,
+                    run_scanned,
+                    stopped_by_runtime,
+                ) = scan_generated_target_domains(
+                    args=args,
+                    domains=domains,
+                    tlds=tlds,
+                    generated_alphabet=generated_alphabet,
+                    apihz_url=apihz_url,
+                    scan_state=scan_state,
+                    deadline=deadline,
                 )
-
-                if whois_result.registered is False:
-                    print("  -> WHOIS 显示未注册，开始备案补查...")
-                    icp_result = query_domain(
-                        session=session,
-                        domain=domain,
-                        provider=args.icp_provider,
-                        apihz_url=apihz_url,
-                        timeout=args.timeout,
-                        retries=max(args.retries, 0),
-                        api_id=args.apihz_id,
-                        api_key=args.apihz_key,
-                    )
-                    result = merge_unregistered_whois_and_icp(whois_result, icp_result)
-                elif whois_result.status == "error":
-                    result = whois_result
-                elif whois_result.status == "unknown":
-                    result = whois_result
-                else:
-                    result = make_nonmatching_registered_result(whois_result)
-
-                all_checked_results.append(result)
-                if result.status == "found" and result.registered is False:
-                    matched_results.append(result)
-                print_target_result(result)
-                run_scanned += 1
-                write_scan_state(
-                    args.state_file,
-                    {
-                        "mode": "generate",
-                        "target": args.target,
-                        "last_domain": domain,
-                        "last_label": domain_label(domain),
-                        "min_length": args.min_length,
-                        "max_length": args.max_length,
-                        "alphabet": generated_alphabet,
-                        "tlds": list(tlds),
-                        "limit": args.limit,
-                        "scanned_domains_total": previous_scanned_total + run_scanned,
-                        "last_run_scanned": run_scanned,
-                        "last_run_matched": len(matched_results),
-                        "stopped_by_runtime": False,
-                    },
-                )
-
-                if index < len(domains) and args.delay > 0:
-                    time.sleep(args.delay)
+            except ValueError as exc:
+                print(f"并发参数错误: {exc}")
+                return 2
         else:
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(headless=not args.headed)

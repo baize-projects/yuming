@@ -1,4 +1,8 @@
+import json
+import tempfile
 import unittest
+from argparse import Namespace
+from pathlib import Path
 from unittest.mock import patch
 
 import icp_query
@@ -85,6 +89,56 @@ class IcpQueryTests(unittest.TestCase):
             domains,
             ["0000.xyz", "0000.top", "0001.xyz", "0001.top", "0002.xyz"],
         )
+
+    def test_concurrent_generated_scan_writes_ordered_state(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_file = str(Path(temp_dir) / "state.json")
+            args = Namespace(
+                state_file=state_file,
+                target=icp_query.TARGET_UNREGISTERED_WITH_ICP,
+                min_length=4,
+                max_length=4,
+                limit=3,
+                concurrency=2,
+                batch_size=2,
+                timeout=1,
+                retries=0,
+                delay=0,
+                icp_provider="jyblog-api",
+                apihz_id="id",
+                apihz_key="key",
+            )
+
+            def fake_query(domain, *_args, **_kwargs):
+                return icp_query.QueryResult(
+                    domain=domain,
+                    status="not_found",
+                    provider="fake",
+                    registered=True,
+                    error="域名已注册，不符合未注册目标",
+                )
+
+            with patch("icp_query.query_unregistered_with_icp_target", side_effect=fake_query):
+                checked, matched, scanned, stopped = icp_query.scan_generated_target_domains(
+                    args=args,
+                    domains=["0000.xyz", "0000.icu", "0000.top"],
+                    tlds=(".xyz", ".icu", ".top"),
+                    generated_alphabet="0123456789",
+                    apihz_url="",
+                    scan_state={},
+                    deadline=None,
+                )
+
+            self.assertEqual([result.domain for result in checked], ["0000.xyz", "0000.icu", "0000.top"])
+            self.assertEqual(matched, [])
+            self.assertEqual(scanned, 3)
+            self.assertFalse(stopped)
+
+            state = json.loads(Path(state_file).read_text(encoding="utf-8"))
+            self.assertEqual(state["last_domain"], "0000.top")
+            self.assertEqual(state["scanned_domains_total"], 3)
+            self.assertEqual(state["concurrency"], 2)
+            self.assertEqual(state["batch_size"], 2)
 
     def test_apicn_day_records_extract_domain_and_history_fields(self):
         records, raw_count = icp_query.parse_apicn_day_records(

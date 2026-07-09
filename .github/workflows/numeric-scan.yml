@@ -34,6 +34,10 @@ jobs:
         run: python -m pip install -r requirements.txt
 
       - name: Run numeric scanner
+        env:
+          SCAN_CONCURRENCY: ${{ vars.SCAN_CONCURRENCY }}
+          SCAN_BATCH_SIZE: ${{ vars.SCAN_BATCH_SIZE }}
+          SCAN_BATCH_DELAY: ${{ vars.SCAN_BATCH_DELAY }}
         run: |
           python -u icp_query.py \
             --generate \
@@ -42,7 +46,9 @@ jobs:
             --max-length 8 \
             --limit 200000 \
             --target unregistered-with-icp \
-            --delay 0.5 \
+            --concurrency "${SCAN_CONCURRENCY:-8}" \
+            --batch-size "${SCAN_BATCH_SIZE:-64}" \
+            --delay "${SCAN_BATCH_DELAY:-0.2}" \
             --timeout 20 \
             --retries 1 \
             --max-runtime-seconds 3600 \

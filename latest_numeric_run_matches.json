@@ -1,0 +1,35 @@
+{
+  "generated_at": "2026-07-09T22:30:47",
+  "summary": {
+    "total": 0,
+    "found": 0,
+    "not_found": 0,
+    "error": 0,
+    "unknown": 0
+  },
+  "results": [],
+  "metadata": {
+    "target": "unregistered-with-icp",
+    "candidate_source": "generated",
+    "whois_provider": "jyblog-whois-api",
+    "icp_provider": "jyblog-api",
+    "scanned_domains": 200000,
+    "checked_summary": {
+      "total": 2624,
+      "found": 0,
+      "not_found": 1943,
+      "error": 0,
+      "unknown": 681
+    },
+    "saved_results": "matches_only",
+    "generated": true,
+    "apicn_day_source": false,
+    "generate_min_length": 4,
+    "generate_max_length": 8,
+    "generate_alphabet": "0123456789",
+    "generate_limit": 200000,
+    "generate_start_after": null,
+    "run_scanned": 2624,
+    "stopped_by_runtime": true
+  }
+}

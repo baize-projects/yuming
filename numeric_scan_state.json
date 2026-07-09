@@ -1,0 +1,25 @@
+{
+  "mode": "generate",
+  "target": "unregistered-with-icp",
+  "last_domain": "0874.icu",
+  "last_label": "0874",
+  "min_length": 4,
+  "max_length": 8,
+  "alphabet": "0123456789",
+  "tlds": [
+    ".xyz",
+    ".icu",
+    ".top"
+  ],
+  "limit": 200000,
+  "concurrency": 32,
+  "icp_concurrency": 2,
+  "icp_timeout": 10,
+  "icp_retries": 0,
+  "batch_size": 64,
+  "scanned_domains_total": 2624,
+  "last_run_scanned": 2624,
+  "last_run_matched": 0,
+  "stopped_by_runtime": true,
+  "updated_at": "2026-07-09T22:30:47"
+}

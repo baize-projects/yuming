@@ -147,6 +147,8 @@ class IcpQueryTests(unittest.TestCase):
                 "SCAN_CONCURRENCY": "",
                 "SCAN_BATCH_SIZE": "",
                 "APICN_PAGE_SIZE": "",
+                "RDAP_TIMEOUT": "",
+                "RDAP_RETRIES": "",
             },
             clear=False,
         ):
@@ -156,6 +158,8 @@ class IcpQueryTests(unittest.TestCase):
         self.assertEqual(args.concurrency, 1)
         self.assertEqual(args.batch_size, 32)
         self.assertEqual(args.apicn_page_size, icp_query.APICN_MAX_PAGE_SIZE)
+        self.assertEqual(args.rdap_timeout, icp_query.DEFAULT_RDAP_TIMEOUT)
+        self.assertEqual(args.rdap_retries, 0)
 
     def test_apicn_day_records_extract_domain_and_history_fields(self):
         records, raw_count = icp_query.parse_apicn_day_records(
@@ -523,6 +527,12 @@ class IcpQueryTests(unittest.TestCase):
         self.assertFalse(result.registered)
         self.assertEqual(result.error, "域名未注册")
 
+    def test_top_domains_use_direct_rdap_endpoint(self):
+        self.assertEqual(
+            icp_query.build_rdap_domain_url("0050.top"),
+            "https://rdap.zdnsgtld.com/top/domain/0050.top",
+        )
+
     def test_jyblog_empty_whois_falls_back_to_rdap_registered(self):
         result = icp_query.query_jyblog_api_whois(
             FakeSession(
@@ -558,6 +568,31 @@ class IcpQueryTests(unittest.TestCase):
         self.assertEqual(result.expiration_date, "2027-10-27T09:56:27")
         self.assertIn("jyblog_whois_api", result.raw)
         self.assertIn("rdap", result.raw)
+
+    def test_target_query_skips_rdap_when_uncertain_whois_has_no_icp(self):
+        args = Namespace(
+            timeout=1,
+            retries=0,
+            rdap_timeout=1,
+            rdap_retries=0,
+            icp_provider="jyblog-api",
+            apihz_id="id",
+            apihz_key="key",
+        )
+        session = FakeSession([[], {}])
+
+        result = icp_query.query_unregistered_with_icp_target(
+            domain="0050.top",
+            args=args,
+            apihz_url="",
+            session=session,
+        )
+
+        self.assertEqual(result.status, "not_found")
+        self.assertIsNone(result.registered)
+        self.assertEqual(result.provider, "jyblog-whois-api+jyblog-api")
+        self.assertIn("WHOIS 不确定", result.error)
+        self.assertEqual(session.payloads, [])
 
     def test_apihz_detects_icp_with_icp_literal(self):
         result = icp_query.query_apihz(

@@ -38,6 +38,8 @@ jobs:
           SCAN_CONCURRENCY: ${{ vars.SCAN_CONCURRENCY }}
           SCAN_BATCH_SIZE: ${{ vars.SCAN_BATCH_SIZE }}
           SCAN_BATCH_DELAY: ${{ vars.SCAN_BATCH_DELAY }}
+          RDAP_TIMEOUT: ${{ vars.RDAP_TIMEOUT }}
+          RDAP_RETRIES: ${{ vars.RDAP_RETRIES }}
         run: |
           python -u icp_query.py \
             --generate \
@@ -46,11 +48,13 @@ jobs:
             --max-length 8 \
             --limit 200000 \
             --target unregistered-with-icp \
-            --concurrency "${SCAN_CONCURRENCY:-8}" \
+            --concurrency "${SCAN_CONCURRENCY:-32}" \
             --batch-size "${SCAN_BATCH_SIZE:-64}" \
-            --delay "${SCAN_BATCH_DELAY:-0.2}" \
+            --delay "${SCAN_BATCH_DELAY:-0.1}" \
             --timeout 20 \
             --retries 1 \
+            --rdap-timeout "${RDAP_TIMEOUT:-5}" \
+            --rdap-retries "${RDAP_RETRIES:-0}" \
             --max-runtime-seconds 3600 \
             --state-file numeric_scan_state.json \
             --matches-file numeric_scan_matches.json \

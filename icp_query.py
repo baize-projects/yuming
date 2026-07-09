@@ -35,7 +35,11 @@ JYBLOG_URL = "https://who.jyblog.com/"
 JYBLOG_WHOIS_API = "https://who.jyblog.com/api/whois/"
 JYBLOG_BEIAN_API = "https://who.jyblog.com/api/beian/"
 JYBLOG_SECRET_KEY = "jyblog20240103"
-RDAP_DOMAIN_URL = "https://rdap.org/domain/"
+RDAP_DEFAULT_DOMAIN_URL = "https://rdap.org/domain/"
+RDAP_TLD_URLS = {
+    ".top": "https://rdap.zdnsgtld.com/top/domain/",
+}
+DEFAULT_RDAP_TIMEOUT = 8
 GENERATED_ALPHABET = string.ascii_lowercase + string.digits
 TARGET_ALL = "all"
 TARGET_UNREGISTERED_WITH_ICP = "unregistered-with-icp"
@@ -742,6 +746,14 @@ def parse_rdap_datetime(raw: Any, action: str) -> str | None:
 def parse_rdap_domain(domain: str, raw: Any, status_code: int) -> QueryResult:
     if isinstance(raw, dict):
         error_code = raw.get("errorCode")
+        if status_code == 429 or error_code == 429:
+            return QueryResult(
+                domain=domain,
+                status="error",
+                provider="rdap",
+                raw=raw,
+                error="RDAP 频控",
+            )
         if status_code == 404 or error_code == 404:
             return QueryResult(
                 domain=domain,
@@ -788,13 +800,20 @@ def parse_rdap_domain(domain: str, raw: Any, status_code: int) -> QueryResult:
     )
 
 
+def build_rdap_domain_url(domain: str) -> str:
+    normalized_domain = normalize_domain(domain) or domain.strip().lower()
+    tld = f".{normalized_domain.rsplit('.', 1)[-1]}" if "." in normalized_domain else ""
+    base_url = RDAP_TLD_URLS.get(tld, RDAP_DEFAULT_DOMAIN_URL)
+    return urljoin(base_url, quote(normalized_domain))
+
+
 def query_rdap_domain(
     session: requests.Session,
     domain: str,
     timeout: int,
     retries: int,
 ) -> QueryResult:
-    url = urljoin(RDAP_DOMAIN_URL, quote(domain))
+    url = build_rdap_domain_url(domain)
     for attempt in range(retries + 1):
         try:
             response = session.get(url, timeout=timeout)
@@ -805,6 +824,17 @@ def query_rdap_domain(
                 preview = body[:180] if body else "<empty body>"
                 raise ProviderError(f"RDAP 未返回 JSON: {preview}") from exc
 
+            if response.status_code == 429:
+                if attempt < retries:
+                    time.sleep(min(15, 3 * (attempt + 1)))
+                    continue
+                return QueryResult(
+                    domain=domain,
+                    status="error",
+                    provider="rdap",
+                    raw=raw,
+                    error="RDAP 频控",
+                )
             if response.status_code >= 500:
                 response.raise_for_status()
             return parse_rdap_domain(domain, raw, response.status_code)
@@ -841,6 +871,9 @@ def query_jyblog_api_whois(
     domain: str,
     timeout: int,
     retries: int,
+    rdap_fallback: bool = True,
+    rdap_timeout: int | None = None,
+    rdap_retries: int | None = None,
 ) -> QueryResult:
     for attempt in range(retries + 1):
         try:
@@ -852,12 +885,12 @@ def query_jyblog_api_whois(
                 timeout=timeout,
             )
             result = parse_jyblog_whois_api(domain, raw)
-            if should_fallback_to_rdap(result):
+            if rdap_fallback and should_fallback_to_rdap(result):
                 rdap_result = query_rdap_domain(
                     session=session,
                     domain=domain,
-                    timeout=timeout,
-                    retries=retries,
+                    timeout=rdap_timeout or min(timeout, DEFAULT_RDAP_TIMEOUT),
+                    retries=retries if rdap_retries is None else rdap_retries,
                 )
                 rdap_result.raw = {
                     "jyblog_whois_api": raw,
@@ -1324,6 +1357,7 @@ def query_unregistered_with_icp_target(
         domain=domain,
         timeout=args.timeout,
         retries=max(args.retries, 0),
+        rdap_fallback=False,
     )
 
     if whois_result.registered is False:
@@ -1338,6 +1372,82 @@ def query_unregistered_with_icp_target(
             api_key=args.apihz_key,
         )
         return merge_unregistered_whois_and_icp(whois_result, icp_result)
+    if should_fallback_to_rdap(whois_result):
+        icp_result = query_domain(
+            session=session,
+            domain=domain,
+            provider=args.icp_provider,
+            apihz_url=apihz_url,
+            timeout=args.timeout,
+            retries=max(args.retries, 0),
+            api_id=args.apihz_id,
+            api_key=args.apihz_key,
+        )
+        if icp_result.status != "found":
+            return QueryResult(
+                domain=domain,
+                status=icp_result.status,
+                provider=f"{whois_result.provider}+{icp_result.provider}",
+                raw={
+                    "whois": asdict(whois_result),
+                    "icp": asdict(icp_result),
+                },
+                registered=None,
+                icp=icp_result.icp,
+                main_licence=icp_result.main_licence,
+                unit=icp_result.unit,
+                site_type=icp_result.site_type,
+                approved_at=icp_result.approved_at,
+                error=f"WHOIS 不确定，备案补查结果为 {icp_result.status}: {icp_result.error}",
+            )
+
+        rdap_result = query_rdap_domain(
+            session=session,
+            domain=domain,
+            timeout=min(args.timeout, args.rdap_timeout),
+            retries=max(args.rdap_retries, 0),
+        )
+        if rdap_result.registered is False:
+            result = merge_unregistered_whois_and_icp(rdap_result, icp_result)
+            result.provider = f"{whois_result.provider}+{icp_result.provider}+{rdap_result.provider}"
+            result.raw = {
+                "whois": asdict(whois_result),
+                "icp": asdict(icp_result),
+                "rdap": asdict(rdap_result),
+            }
+            return result
+        if rdap_result.registered is True:
+            result = make_nonmatching_registered_result(rdap_result)
+            result.provider = f"{whois_result.provider}+{icp_result.provider}+{rdap_result.provider}"
+            result.raw = {
+                "whois": asdict(whois_result),
+                "icp": asdict(icp_result),
+                "rdap": asdict(rdap_result),
+            }
+            result.icp = icp_result.icp
+            result.main_licence = icp_result.main_licence
+            result.unit = icp_result.unit
+            result.site_type = icp_result.site_type
+            result.approved_at = icp_result.approved_at
+            return result
+
+        return QueryResult(
+            domain=domain,
+            status=rdap_result.status,
+            provider=f"{whois_result.provider}+{icp_result.provider}+{rdap_result.provider}",
+            raw={
+                "whois": asdict(whois_result),
+                "icp": asdict(icp_result),
+                "rdap": asdict(rdap_result),
+            },
+            registered=None,
+            icp=icp_result.icp,
+            main_licence=icp_result.main_licence,
+            unit=icp_result.unit,
+            site_type=icp_result.site_type,
+            approved_at=icp_result.approved_at,
+            error=f"查到备案，但 RDAP 无法确认未注册: {rdap_result.error}",
+        )
     if whois_result.status in {"error", "unknown"}:
         return whois_result
     return make_nonmatching_registered_result(whois_result)
@@ -2026,6 +2136,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=DEFAULT_RETRIES,
         help=f"遇到网络错误或频控时的重试次数，默认：{DEFAULT_RETRIES}",
+    )
+    parser.add_argument(
+        "--rdap-timeout",
+        type=int,
+        default=env_int("RDAP_TIMEOUT", DEFAULT_RDAP_TIMEOUT),
+        help=f"RDAP 兜底请求超时秒数，默认：{DEFAULT_RDAP_TIMEOUT}。",
+    )
+    parser.add_argument(
+        "--rdap-retries",
+        type=int,
+        default=env_int("RDAP_RETRIES", 0),
+        help="RDAP 兜底请求重试次数，默认：0。",
     )
     parser.add_argument(
         "--apihz-id",

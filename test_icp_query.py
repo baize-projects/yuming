@@ -52,6 +52,75 @@ class IcpQueryTests(unittest.TestCase):
 
         self.assertEqual(domains, ["aaab.xyz", "aaab.icu", "aaac.xyz"])
 
+    def test_apicn_day_records_extract_domain_and_history_fields(self):
+        records, raw_count = icp_query.parse_apicn_day_records(
+            {
+                "code": 200,
+                "data": {
+                    "list": [
+                        {
+                            "domain": "oldsite.xyz",
+                            "company": "示例科技有限公司",
+                            "license": "京ICP备12345678号-1",
+                            "audit_date": "2024-03-02",
+                        },
+                        {
+                            "domain": "oldsite.xyz",
+                            "company": "重复记录会被去重",
+                        },
+                    ]
+                },
+            },
+            "2024-03-02",
+            3,
+        )
+
+        self.assertEqual(raw_count, 2)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].domain, "oldsite.xyz")
+        self.assertEqual(records[0].provider, "apicn-day")
+        self.assertEqual(records[0].icp, "京ICP备12345678号-1")
+        self.assertEqual(records[0].unit, "示例科技有限公司")
+        self.assertEqual(records[0].approved_at, "2024-03-02")
+        self.assertEqual(records[0].raw["source_page"], 3)
+
+    def test_apicn_history_match_keeps_record_when_domain_is_unregistered(self):
+        whois_result = icp_query.QueryResult(
+            domain="oldsite.xyz",
+            status="not_found",
+            provider="jyblog-whois-api",
+            registered=False,
+            error="域名未注册",
+        )
+        history_result = icp_query.QueryResult(
+            domain="oldsite.xyz",
+            status="found",
+            provider="apicn-day",
+            icp="京ICP备12345678号-1",
+            unit="示例科技有限公司",
+            approved_at="2024-03-02",
+        )
+
+        result = icp_query.merge_unregistered_whois_and_history(
+            whois_result,
+            history_result,
+        )
+
+        self.assertEqual(result.status, "found")
+        self.assertFalse(result.registered)
+        self.assertEqual(result.provider, "jyblog-whois-api+apicn-day")
+        self.assertEqual(result.icp, "京ICP备12345678号-1")
+        self.assertEqual(result.unit, "示例科技有限公司")
+        self.assertIn("whois", result.raw)
+        self.assertIn("history", result.raw)
+
+    def test_generate_and_apicn_source_are_mutually_exclusive(self):
+        with patch(
+            "icp_query.sys.argv",
+            ["icp_query.py", "--generate", "--apicn-day-source", "--limit", "1"],
+        ):
+            self.assertEqual(icp_query.main(), 2)
+
     def test_jyblog_signature_matches_frontend_sample(self):
         signature = icp_query.generate_jyblog_signature(
             "NjJSU6pjCTgC5G5x",

@@ -9,7 +9,7 @@ import string
 import sys
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urljoin, urlparse
@@ -27,6 +27,8 @@ DEFAULT_DELAY = 1.5
 DEFAULT_RETRIES = 2
 DEFAULT_STATE_FILE = "scan_state.json"
 DEFAULT_MATCHES_FILE = "scan_matches.json"
+DEFAULT_APICN_STATE_FILE = "apicn_scan_state.json"
+DEFAULT_APICN_MATCHES_FILE = "apicn_scan_matches.json"
 JYBLOG_URL = "https://who.jyblog.com/"
 JYBLOG_WHOIS_API = "https://who.jyblog.com/api/whois/"
 JYBLOG_BEIAN_API = "https://who.jyblog.com/api/beian/"
@@ -42,6 +44,10 @@ APIHZ_PUBLIC_ID = "88888888"
 APIHZ_PUBLIC_KEY = "88888888"
 
 UOMG_URL = "https://api.uomg.com/api/icp"
+
+APICN_DAY_PATH = "day/"
+APICN_MAX_PAGE_SIZE = 1000
+APICN_DEFAULT_START_DATE = "2024-01-01"
 
 TRANSIENT_ERROR_WORDS = ("重试", "频次", "限流", "错误", "超时")
 NO_RECORD_WORDS = ("没有备案", "无备案", "未备案", "未查询到备案")
@@ -181,13 +187,202 @@ def build_generated_domains(
     return list(itertools.islice(iterator, limit))
 
 
+def parse_date_arg(value: str | None, name: str) -> date | None:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError(f"{name} 必须是 YYYY-MM-DD 格式") from exc
+
+
+def build_apicn_day_url(base_url: str) -> str:
+    return urljoin(base_url.rstrip("/") + "/", APICN_DAY_PATH)
+
+
+def normalize_page_size(value: int) -> int:
+    if value < 1:
+        raise ValueError("apicn-page-size 必须大于 0")
+    return min(value, APICN_MAX_PAGE_SIZE)
+
+
+def find_first_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if not isinstance(value, dict):
+        return []
+
+    preferred_keys = (
+        "data",
+        "list",
+        "rows",
+        "items",
+        "records",
+        "result",
+        "results",
+    )
+    for key in preferred_keys:
+        nested = value.get(key)
+        found = find_first_list(nested)
+        if found:
+            return found
+
+    for nested in value.values():
+        found = find_first_list(nested)
+        if found:
+            return found
+    return []
+
+
+def extract_record_value(record: Any, keys: tuple[str, ...]) -> Any:
+    if not isinstance(record, dict):
+        return None
+    lower_to_key = {str(key).lower(): key for key in record}
+    for key in keys:
+        actual_key = lower_to_key.get(key.lower())
+        if actual_key is not None:
+            value = record.get(actual_key)
+            if value not in (None, ""):
+                return value
+    return None
+
+
+def extract_record_domain(record: Any) -> str | None:
+    if isinstance(record, str):
+        return normalize_domain(record)
+    if not isinstance(record, dict):
+        return None
+
+    domain_value = extract_record_value(
+        record,
+        (
+            "domain",
+            "domain_name",
+            "domainName",
+            "site_domain",
+            "siteDomain",
+            "web_domain",
+            "webDomain",
+            "url",
+            "website",
+            "homeUrl",
+            "homepage",
+        ),
+    )
+    if domain_value:
+        return normalize_domain(str(domain_value))
+
+    text = json.dumps(record, ensure_ascii=False)
+    match = re.search(r"\b[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.[a-z]{2,}\b", text, re.I)
+    return normalize_domain(match.group(0)) if match else None
+
+
+def parse_apicn_day_records(
+    raw: Any,
+    query_date: str,
+    page: int,
+) -> tuple[list[QueryResult], int]:
+    records = find_first_list(raw)
+    parsed: list[QueryResult] = []
+    seen: set[str] = set()
+
+    for offset, record in enumerate(records):
+        domain = extract_record_domain(record)
+        if not domain or domain in seen:
+            continue
+        seen.add(domain)
+
+        icp = extract_record_value(
+            record,
+            (
+                "license",
+                "serviceLicence",
+                "service_license",
+                "icp",
+                "icpNo",
+                "icp_no",
+            ),
+        )
+        main_licence = extract_record_value(
+            record,
+            ("mainLicence", "main_license", "mainLicense", "main_licence"),
+        )
+        unit = extract_record_value(
+            record,
+            ("company", "unit", "unitName", "unit_name", "name"),
+        )
+        site_type = extract_record_value(
+            record,
+            ("type", "natureName", "nature_name", "unitType", "unit_type"),
+        )
+        approved_at = extract_record_value(
+            record,
+            ("audit_date", "auditDate", "approved_at", "time", "updateRecordTime"),
+        )
+
+        parsed.append(
+            QueryResult(
+                domain=domain,
+                status="found",
+                provider="apicn-day",
+                raw={
+                    "source_date": query_date,
+                    "source_page": page,
+                    "source_offset": offset,
+                    "record": record,
+                },
+                icp=str(icp) if icp is not None else None,
+                main_licence=str(main_licence) if main_licence is not None else None,
+                unit=str(unit) if unit is not None else None,
+                site_type=str(site_type) if site_type is not None else None,
+                approved_at=str(approved_at) if approved_at is not None else None,
+            )
+        )
+
+    return parsed, len(records)
+
+
+def query_apicn_day_page(
+    session: requests.Session,
+    base_url: str,
+    token: str,
+    query_date: str,
+    page: int,
+    page_size: int,
+    timeout: int,
+) -> tuple[list[QueryResult], int, Any]:
+    params = {
+        "token": token,
+        "date": query_date,
+        "page": page,
+        "limit": page_size,
+    }
+    raw = request_json(
+        session=session,
+        url=build_apicn_day_url(base_url),
+        params=params,
+        timeout=timeout,
+        headers={"token": token, "Authorization": f"Bearer {token}"},
+    )
+    if isinstance(raw, dict):
+        code = raw.get("code") or raw.get("status")
+        message = str(raw.get("message") or raw.get("msg") or "")
+        has_records = bool(find_first_list(raw))
+        if code not in (None, 0, 1, 200, "0", "1", "200") and not has_records:
+            raise ProviderError(message or f"API.cn 返回异常状态: {code}")
+
+    records, raw_count = parse_apicn_day_records(raw, query_date, page)
+    return records, raw_count, raw
+
+
 def request_json(
     session: requests.Session,
     url: str,
-    params: dict[str, str],
+    params: dict[str, Any],
     timeout: int,
+    headers: dict[str, str] | None = None,
 ) -> Any:
-    response = session.get(url, params=params, timeout=timeout)
+    response = session.get(url, params=params, headers=headers, timeout=timeout)
     response.raise_for_status()
     try:
         return response.json()
@@ -982,6 +1177,28 @@ def merge_unregistered_whois_and_icp(
     )
 
 
+def merge_unregistered_whois_and_history(
+    whois_result: QueryResult,
+    history_result: QueryResult,
+) -> QueryResult:
+    return QueryResult(
+        domain=whois_result.domain,
+        status="found",
+        provider=f"{whois_result.provider}+{history_result.provider}",
+        raw={
+            "whois": asdict(whois_result),
+            "history": asdict(history_result),
+        },
+        registered=False,
+        expired=None,
+        icp=history_result.icp,
+        main_licence=history_result.main_licence,
+        unit=history_result.unit,
+        site_type=history_result.site_type,
+        approved_at=history_result.approved_at,
+    )
+
+
 def print_result(result: QueryResult) -> None:
     if result.status == "found":
         details = "，".join(
@@ -1134,6 +1351,217 @@ def print_summary(summary: dict[str, int], found_label: str = "查到备案") ->
     )
 
 
+def scan_apicn_day_source(
+    args: argparse.Namespace,
+    session: requests.Session,
+    tlds: tuple[str, ...],
+    scan_state: dict[str, Any],
+    deadline: float | None,
+) -> tuple[list[QueryResult], list[QueryResult], int, bool, dict[str, Any]]:
+    if not args.apicn_base_url:
+        raise ProviderError("缺少 APICN_BASE_URL。请在 GitHub Secrets 中配置 APICN_BASE_URL。")
+    if not args.apicn_token:
+        raise ProviderError("缺少 APICN_TOKEN。请在 GitHub Secrets 中配置 APICN_TOKEN。")
+
+    start_date = parse_date_arg(args.apicn_start_date, "apicn-start-date")
+    end_date = parse_date_arg(args.apicn_end_date, "apicn-end-date") or datetime.now().date()
+    if start_date is None:
+        start_date = parse_date_arg(APICN_DEFAULT_START_DATE, "apicn-start-date")
+    if start_date is None:
+        raise ProviderError("apicn-start-date 不能为空")
+    if end_date < start_date:
+        raise ProviderError("apicn-end-date 不能早于 apicn-start-date")
+
+    state_date = parse_date_arg(str(scan_state.get("apicn_date") or ""), "state.apicn_date")
+    current_date = max(state_date or start_date, start_date)
+    page = max(int(scan_state.get("apicn_page") or 1), 1)
+    offset = max(int(scan_state.get("apicn_offset") or 0), 0)
+    page_size = normalize_page_size(args.apicn_page_size)
+
+    all_checked_results: list[QueryResult] = []
+    matched_results: list[QueryResult] = []
+    run_scanned = 0
+    stopped_by_runtime = False
+    stopped_by_limit = False
+    previous_scanned_total = int(scan_state.get("scanned_domains_total") or 0)
+
+    def save_state(
+        query_date: date,
+        current_page: int,
+        current_offset: int,
+        raw_count: int | None = None,
+    ) -> None:
+        write_scan_state(
+            args.state_file,
+            {
+                "mode": "apicn-day",
+                "target": args.target,
+                "apicn_date": query_date.isoformat(),
+                "apicn_page": current_page,
+                "apicn_offset": current_offset,
+                "apicn_start_date": start_date.isoformat(),
+                "apicn_end_date": end_date.isoformat(),
+                "apicn_page_size": page_size,
+                "tlds": list(tlds),
+                "scanned_domains_total": previous_scanned_total + run_scanned,
+                "last_run_scanned": run_scanned,
+                "last_run_matched": len(matched_results),
+                "last_page_raw_count": raw_count,
+                "stopped_by_runtime": stopped_by_runtime,
+                "stopped_by_limit": stopped_by_limit,
+            },
+        )
+
+    print("历史备案候选接口: API.cn /day/")
+    print(f"历史备案日期范围: {start_date.isoformat()} -> {end_date.isoformat()}")
+    print(f"历史备案续跑位置: {current_date.isoformat()} 第 {page} 页 offset {offset}\n")
+
+    while current_date <= end_date:
+        if deadline and time.monotonic() >= deadline:
+            stopped_by_runtime = True
+            save_state(current_date, page, offset)
+            print("  -> 达到本次运行时间上限，保存状态后退出。")
+            break
+        if args.limit and run_scanned >= args.limit:
+            stopped_by_limit = True
+            save_state(current_date, page, offset)
+            print("  -> 达到本次运行数量上限，保存状态后退出。")
+            break
+
+        print(f"拉取历史备案候选: {current_date.isoformat()} 第 {page} 页")
+        for attempt in range(max(args.retries, 0) + 1):
+            try:
+                history_records, raw_count, _raw = query_apicn_day_page(
+                    session=session,
+                    base_url=args.apicn_base_url,
+                    token=args.apicn_token,
+                    query_date=current_date.isoformat(),
+                    page=page,
+                    page_size=page_size,
+                    timeout=args.timeout,
+                )
+                break
+            except (requests.RequestException, ProviderError) as exc:
+                if attempt < max(args.retries, 0):
+                    time.sleep(2)
+                    continue
+                raise ProviderError(
+                    f"API.cn {current_date.isoformat()} 第 {page} 页拉取失败: {exc}"
+                ) from exc
+
+        if not args.all_tlds:
+            history_records = [
+                record for record in history_records if record.domain.endswith(tlds)
+            ]
+
+        if offset >= len(history_records):
+            is_last_page = raw_count < page_size
+            if is_last_page:
+                current_date += timedelta(days=1)
+                page = 1
+            else:
+                page += 1
+            offset = 0
+            if current_date <= end_date:
+                save_state(current_date, page, offset, raw_count)
+            continue
+
+        for index in range(offset, len(history_records)):
+            if deadline and time.monotonic() >= deadline:
+                stopped_by_runtime = True
+                save_state(current_date, page, index, raw_count)
+                print("  -> 达到本次运行时间上限，保存状态后退出。")
+                return (
+                    all_checked_results,
+                    matched_results,
+                    run_scanned,
+                    stopped_by_runtime,
+                    {
+                        "history_source": "apicn-day",
+                        "history_stopped_by_limit": stopped_by_limit,
+                    },
+                )
+            if args.limit and run_scanned >= args.limit:
+                stopped_by_limit = True
+                save_state(current_date, page, index, raw_count)
+                print("  -> 达到本次运行数量上限，保存状态后退出。")
+                return (
+                    all_checked_results,
+                    matched_results,
+                    run_scanned,
+                    stopped_by_runtime,
+                    {
+                        "history_source": "apicn-day",
+                        "history_stopped_by_limit": stopped_by_limit,
+                    },
+                )
+
+            history_result = history_records[index]
+            domain = history_result.domain
+            print(
+                f"[{run_scanned + 1}] 历史备案候选: {domain} "
+                f"({current_date.isoformat()} p{page}#{index})"
+            )
+            whois_result = query_jyblog_api_whois(
+                session=session,
+                domain=domain,
+                timeout=args.timeout,
+                retries=max(args.retries, 0),
+            )
+
+            if whois_result.registered is False:
+                result = merge_unregistered_whois_and_history(whois_result, history_result)
+            elif whois_result.status in {"error", "unknown"}:
+                result = whois_result
+            else:
+                result = make_nonmatching_registered_result(whois_result)
+                result.raw = {
+                    "whois": asdict(whois_result),
+                    "history": asdict(history_result),
+                }
+                result.icp = history_result.icp
+                result.main_licence = history_result.main_licence
+                result.unit = history_result.unit
+                result.site_type = history_result.site_type
+                result.approved_at = history_result.approved_at
+
+            all_checked_results.append(result)
+            if result.status == "found" and result.registered is False:
+                matched_results.append(result)
+            print_target_result(result)
+
+            run_scanned += 1
+            save_state(current_date, page, index + 1, raw_count)
+
+            if index < len(history_records) - 1 and args.delay > 0:
+                time.sleep(args.delay)
+
+        is_last_page = raw_count < page_size
+        if is_last_page:
+            current_date += timedelta(days=1)
+            page = 1
+        else:
+            page += 1
+        offset = 0
+        if current_date <= end_date:
+            save_state(current_date, page, offset, raw_count)
+
+    return (
+        all_checked_results,
+        matched_results,
+        run_scanned,
+        stopped_by_runtime,
+        {
+            "history_source": "apicn-day",
+            "history_start_date": start_date.isoformat(),
+            "history_end_date": end_date.isoformat(),
+            "history_last_date": min(current_date, end_date).isoformat(),
+            "history_page_size": page_size,
+            "history_stopped_by_limit": stopped_by_limit,
+        },
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="批量查询域名 WHOIS、过期时间和 ICP 备案记录。"
@@ -1156,6 +1584,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="按 a-z0-9 组合生成候选域名；默认从 4 字符 label 开始。",
     )
     parser.add_argument(
+        "--apicn-day-source",
+        action="store_true",
+        help="从 API.cn /day/ 历史备案日期库拉取候选域名，再查询当前 WHOIS。",
+    )
+    parser.add_argument(
         "--min-length",
         type=int,
         default=4,
@@ -1170,7 +1603,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--limit",
         type=int,
-        help="生成模式本次最多查询多少个域名；首次试跑建议设置。",
+        help="生成模式或历史备案模式本次最多查询多少个候选域名；首次试跑建议设置。",
     )
     parser.add_argument(
         "--max-runtime-seconds",
@@ -1180,12 +1613,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--state-file",
         default=DEFAULT_STATE_FILE,
-        help=f"生成模式续跑状态文件，默认：{DEFAULT_STATE_FILE}。",
+        help=f"生成模式或历史备案模式续跑状态文件，默认：{DEFAULT_STATE_FILE}。",
     )
     parser.add_argument(
         "--matches-file",
         default=DEFAULT_MATCHES_FILE,
-        help=f"累计命中结果文件，默认：{DEFAULT_MATCHES_FILE}。",
+        help=f"生成模式或历史备案模式累计命中结果文件，默认：{DEFAULT_MATCHES_FILE}。",
     )
     parser.add_argument(
         "--start-after",
@@ -1253,6 +1686,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="手动指定接口盒子 API 根地址；默认自动发现当前可用节点。",
     )
     parser.add_argument(
+        "--apicn-base-url",
+        default=os.getenv("APICN_BASE_URL"),
+        help="API.cn 分配的 API 根地址，也可用环境变量 APICN_BASE_URL 设置。",
+    )
+    parser.add_argument(
+        "--apicn-token",
+        default=os.getenv("APICN_TOKEN"),
+        help="API.cn token，也可用环境变量 APICN_TOKEN 设置。",
+    )
+    parser.add_argument(
+        "--apicn-start-date",
+        default=os.getenv("APICN_START_DATE", APICN_DEFAULT_START_DATE),
+        help=f"API.cn 历史备案起始日期，格式 YYYY-MM-DD，默认：{APICN_DEFAULT_START_DATE}。",
+    )
+    parser.add_argument(
+        "--apicn-end-date",
+        default=os.getenv("APICN_END_DATE"),
+        help="API.cn 历史备案结束日期，格式 YYYY-MM-DD；默认到今天。",
+    )
+    parser.add_argument(
+        "--apicn-page-size",
+        type=int,
+        default=int(os.getenv("APICN_PAGE_SIZE", str(APICN_MAX_PAGE_SIZE))),
+        help=f"API.cn /day/ 每页数量，最大 {APICN_MAX_PAGE_SIZE}。",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="只解析并展示将要查询的域名，不发起网络请求。",
@@ -1273,6 +1732,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_parser().parse_args()
 
+    if args.generate and args.apicn_day_source:
+        print("--generate 和 --apicn-day-source 不能同时使用。")
+        return 2
+    if args.apicn_day_source:
+        if args.state_file == DEFAULT_STATE_FILE:
+            args.state_file = DEFAULT_APICN_STATE_FILE
+        if args.matches_file == DEFAULT_MATCHES_FILE:
+            args.matches_file = DEFAULT_APICN_MATCHES_FILE
+
     started_monotonic = time.monotonic()
     deadline = (
         started_monotonic + args.max_runtime_seconds
@@ -1280,10 +1748,12 @@ def main() -> int:
         else None
     )
     tlds = tuple(tld.strip().lower() for tld in args.tlds.split(",") if tld.strip())
-    scan_state = load_scan_state(args.state_file) if args.generate else {}
+    scan_state = load_scan_state(args.state_file) if (args.generate or args.apicn_day_source) else {}
     state_start_after = scan_state.get("last_label") or scan_state.get("last_domain")
     effective_start_after = args.start_after or state_start_after
-    if args.generate:
+    if args.apicn_day_source:
+        domains = []
+    elif args.generate:
         if args.limit is None:
             total = generated_domain_count(tlds, args.min_length, args.max_length)
             print(
@@ -1307,16 +1777,25 @@ def main() -> int:
         if not args.all_tlds:
             domains = filter_domains(domains, tlds)
 
-    if not domains:
+    if not domains and not args.apicn_day_source:
         print("没有可查询的域名。请检查输入文件、命令行参数或后缀过滤条件。")
         return 2
 
     print("=== 过期域名 ICP 备案查询脚本 ===")
     print(f"开始时间: {datetime.now()}")
-    print(f"查询接口: {args.provider}")
+    print(f"查询接口: {'apicn-day + jyblog-whois-api' if args.apicn_day_source else args.provider}")
     print(f"筛选目标: {args.target}")
-    print(f"域名数量: {len(domains)}")
-    if args.generate:
+    if not args.apicn_day_source:
+        print(f"域名数量: {len(domains)}")
+    if args.apicn_day_source:
+        print("候选来源: API.cn 历史备案日期库")
+        if deadline:
+            print(f"本次最长扫描秒数: {args.max_runtime_seconds}")
+        if args.limit:
+            print(f"本次最多扫描候选: {args.limit}")
+        print(f"状态文件: {Path(args.state_file).resolve()}")
+        print(f"累计命中结果: {Path(args.matches_file).resolve()}")
+    elif args.generate:
         print(
             "生成模式: "
             f"字符集 a-z0-9，长度 {args.min_length}-{args.max_length}，"
@@ -1340,6 +1819,9 @@ def main() -> int:
         print("      建议设置自己的 APIHZ_ID 和 APIHZ_KEY 后再批量运行。\n")
 
     if args.dry_run:
+        if args.apicn_day_source:
+            print("API.cn 历史备案模式 dry-run：参数解析成功，不发起网络请求。")
+            return 0
         for domain in domains:
             print(f"将查询: {domain}")
         return 0
@@ -1347,7 +1829,9 @@ def main() -> int:
     if args.target == TARGET_UNREGISTERED_WITH_ICP:
         session = create_http_session()
         apihz_url = ""
-        if args.icp_provider == "apihz":
+        if args.apicn_day_source:
+            print("备案证明来源: API.cn 历史备案日期库\n")
+        elif args.icp_provider == "apihz":
             apihz_url = discover_apihz_icp_url(
                 session=session,
                 timeout=args.timeout,
@@ -1362,8 +1846,27 @@ def main() -> int:
         stopped_by_runtime = False
         run_scanned = 0
         previous_scanned_total = int(scan_state.get("scanned_domains_total") or 0)
+        metadata_extra: dict[str, Any] = {}
 
-        if args.generate:
+        if args.apicn_day_source:
+            try:
+                (
+                    all_checked_results,
+                    matched_results,
+                    run_scanned,
+                    stopped_by_runtime,
+                    metadata_extra,
+                ) = scan_apicn_day_source(
+                    args=args,
+                    session=session,
+                    tlds=tlds,
+                    scan_state=scan_state,
+                    deadline=deadline,
+                )
+            except ProviderError as exc:
+                print(f"历史备案候选拉取失败: {exc}")
+                return 1
+        elif args.generate:
             print("WHOIS 查询接口: jyblog-whois-api\n")
             for index, domain in enumerate(domains, start=1):
                 if deadline and time.monotonic() >= deadline:
@@ -1464,21 +1967,31 @@ def main() -> int:
         checked_summary = summarize(all_checked_results)
         metadata = {
             "target": args.target,
-            "whois_provider": "jyblog-whois-api" if args.generate else "jyblog",
-            "icp_provider": args.icp_provider,
-            "scanned_domains": len(domains),
+            "candidate_source": (
+                "apicn-day"
+                if args.apicn_day_source
+                else "generated"
+                if args.generate
+                else "input"
+            ),
+            "whois_provider": "jyblog-whois-api" if (args.generate or args.apicn_day_source) else "jyblog",
+            "icp_provider": None if args.apicn_day_source else args.icp_provider,
+            "scanned_domains": run_scanned if args.apicn_day_source else len(domains),
             "checked_summary": checked_summary,
             "saved_results": "matches_only",
             "generated": args.generate,
+            "apicn_day_source": args.apicn_day_source,
             "generate_min_length": args.min_length if args.generate else None,
             "generate_max_length": args.max_length if args.generate else None,
             "generate_limit": args.limit if args.generate else None,
             "generate_start_after": effective_start_after if args.generate else None,
-            "run_scanned": run_scanned if args.generate else len(all_checked_results),
+            "run_scanned": run_scanned if (args.generate or args.apicn_day_source) else len(all_checked_results),
             "stopped_by_runtime": stopped_by_runtime,
         }
-        if args.generate:
+        metadata.update(metadata_extra)
+        if args.generate or args.apicn_day_source:
             append_matches_file(args.matches_file, matched_results, metadata)
+        if args.generate:
             last_domain = all_checked_results[-1].domain if all_checked_results else None
             if last_domain:
                 write_scan_state(
@@ -1506,7 +2019,7 @@ def main() -> int:
         print("\n查询完成！")
         print(f"扫描 {len(all_checked_results)} 个域名，命中目标 {len(matched_results)} 个。")
         print_summary(checked_summary, found_label="命中")
-        if args.generate:
+        if args.generate or args.apicn_day_source:
             print(f"续跑状态已保存到 {args.state_file}")
             print(f"累计命中结果已保存到 {args.matches_file}")
         print(f"命中结果已保存到 {args.output}")

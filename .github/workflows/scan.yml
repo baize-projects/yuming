@@ -33,27 +33,39 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Run scanner
+      - name: Run historical scanner
+        env:
+          APICN_BASE_URL: ${{ secrets.APICN_BASE_URL }}
+          APICN_TOKEN: ${{ secrets.APICN_TOKEN }}
+          APICN_START_DATE: ${{ vars.APICN_START_DATE }}
+          APICN_END_DATE: ${{ vars.APICN_END_DATE }}
         run: |
+          if [ -z "${APICN_BASE_URL}" ] || [ -z "${APICN_TOKEN}" ]; then
+            echo "::error::Missing APICN_BASE_URL or APICN_TOKEN repository secrets."
+            exit 1
+          fi
+
           python -u icp_query.py \
-            --generate \
-            --min-length 4 \
-            --max-length 4 \
+            --apicn-day-source \
             --limit 200000 \
             --target unregistered-with-icp \
             --delay 0.5 \
             --timeout 20 \
             --retries 1 \
             --max-runtime-seconds 3600 \
-            --state-file scan_state.json \
-            --matches-file scan_matches.json \
-            -o latest_run_matches.json
+            --state-file apicn_scan_state.json \
+            --matches-file apicn_scan_matches.json \
+            -o latest_apicn_run_matches.json
 
       - name: Commit scan state
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add scan_state.json scan_matches.json latest_run_matches.json
+          for file in apicn_scan_state.json apicn_scan_matches.json latest_apicn_run_matches.json; do
+            if [ -e "$file" ]; then
+              git add "$file"
+            fi
+          done
           if git diff --cached --quiet; then
             echo "No scan changes to commit."
           else

@@ -1297,6 +1297,16 @@ def normalize_positive_int(value: int, name: str) -> int:
     return value
 
 
+def env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
 def batched(values: list[str], batch_size: int) -> Any:
     for start in range(0, len(values), batch_size):
         yield start, values[start : start + batch_size]
@@ -1996,13 +2006,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--concurrency",
         type=int,
-        default=int(os.getenv("SCAN_CONCURRENCY", "1")),
+        default=env_int("SCAN_CONCURRENCY", 1),
         help="生成模式并发线程数，默认：1。",
     )
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=int(os.getenv("SCAN_BATCH_SIZE", "32")),
+        default=env_int("SCAN_BATCH_SIZE", 32),
         help="生成模式每批提交的域名数量，默认：32；会自动不小于 concurrency。",
     )
     parser.add_argument(
@@ -2055,7 +2065,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--apicn-page-size",
         type=int,
-        default=int(os.getenv("APICN_PAGE_SIZE", str(APICN_MAX_PAGE_SIZE))),
+        default=env_int("APICN_PAGE_SIZE", APICN_MAX_PAGE_SIZE),
         help=f"API.cn /day/ 每页数量，最大 {APICN_MAX_PAGE_SIZE}。",
     )
     parser.add_argument(

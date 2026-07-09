@@ -140,6 +140,23 @@ class IcpQueryTests(unittest.TestCase):
             self.assertEqual(state["concurrency"], 2)
             self.assertEqual(state["batch_size"], 2)
 
+    def test_empty_integer_env_values_fall_back_to_defaults(self):
+        with patch.dict(
+            "icp_query.os.environ",
+            {
+                "SCAN_CONCURRENCY": "",
+                "SCAN_BATCH_SIZE": "",
+                "APICN_PAGE_SIZE": "",
+            },
+            clear=False,
+        ):
+            parser = icp_query.build_parser()
+            args = parser.parse_args([])
+
+        self.assertEqual(args.concurrency, 1)
+        self.assertEqual(args.batch_size, 32)
+        self.assertEqual(args.apicn_page_size, icp_query.APICN_MAX_PAGE_SIZE)
+
     def test_apicn_day_records_extract_domain_and_history_fields(self):
         records, raw_count = icp_query.parse_apicn_day_records(
             {

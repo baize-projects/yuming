@@ -5,8 +5,10 @@ import icp_query
 
 
 class FakeResponse:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200):
         self.payload = payload
+        self.status_code = status_code
+        self.text = "" if payload is None else str(payload)
 
     def raise_for_status(self):
         return None
@@ -20,10 +22,16 @@ class FakeSession:
         self.payloads = list(payloads)
 
     def get(self, *args, **kwargs):
-        return FakeResponse(self.payloads.pop(0))
+        payload = self.payloads.pop(0)
+        if isinstance(payload, tuple):
+            return FakeResponse(payload[0], payload[1])
+        return FakeResponse(payload)
 
     def post(self, *args, **kwargs):
-        return FakeResponse(self.payloads.pop(0))
+        payload = self.payloads.pop(0)
+        if isinstance(payload, tuple):
+            return FakeResponse(payload[0], payload[1])
+        return FakeResponse(payload)
 
 
 class IcpQueryTests(unittest.TestCase):
@@ -432,6 +440,53 @@ class IcpQueryTests(unittest.TestCase):
         self.assertEqual(result.status, "not_found")
         self.assertFalse(result.registered)
         self.assertEqual(result.error, "域名未注册")
+
+    def test_rdap_detects_unregistered_domain_from_404(self):
+        result = icp_query.parse_rdap_domain(
+            "0145.top",
+            {"errorCode": 404, "title": "Object not found"},
+            404,
+        )
+
+        self.assertEqual(result.status, "not_found")
+        self.assertFalse(result.registered)
+        self.assertEqual(result.error, "域名未注册")
+
+    def test_jyblog_empty_whois_falls_back_to_rdap_registered(self):
+        result = icp_query.query_jyblog_api_whois(
+            FakeSession(
+                [
+                    [],
+                    (
+                        {
+                            "ldhName": "qq.top",
+                            "events": [
+                                {
+                                    "eventAction": "registration",
+                                    "eventDate": "2023-10-27T09:56:27.0Z",
+                                },
+                                {
+                                    "eventAction": "expiration",
+                                    "eventDate": "2027-10-27T09:56:27.0Z",
+                                },
+                            ],
+                            "status": ["client transfer prohibited"],
+                        },
+                        200,
+                    ),
+                ]
+            ),
+            "qq.top",
+            timeout=1,
+            retries=0,
+        )
+
+        self.assertEqual(result.status, "found")
+        self.assertTrue(result.registered)
+        self.assertEqual(result.provider, "jyblog-whois-api+rdap")
+        self.assertEqual(result.expiration_date, "2027-10-27T09:56:27")
+        self.assertIn("jyblog_whois_api", result.raw)
+        self.assertIn("rdap", result.raw)
 
     def test_apihz_detects_icp_with_icp_literal(self):
         result = icp_query.query_apihz(

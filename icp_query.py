@@ -33,6 +33,7 @@ JYBLOG_URL = "https://who.jyblog.com/"
 JYBLOG_WHOIS_API = "https://who.jyblog.com/api/whois/"
 JYBLOG_BEIAN_API = "https://who.jyblog.com/api/beian/"
 JYBLOG_SECRET_KEY = "jyblog20240103"
+RDAP_DOMAIN_URL = "https://rdap.org/domain/"
 GENERATED_ALPHABET = string.ascii_lowercase + string.digits
 TARGET_ALL = "all"
 TARGET_UNREGISTERED_WITH_ICP = "unregistered-with-icp"
@@ -536,7 +537,9 @@ def parse_display_datetime(value: str | None) -> str | None:
         "%Y/%m/%d %H:%M:%S",
         "%Y-%m-%d %H:%M:%S",
         "%Y-%m-%dT%H:%M:%SZ",
+        "%Y-%m-%dT%H:%M:%S.%fZ",
         "%Y-%m-%dT%H:%M:%S%z",
+        "%Y-%m-%dT%H:%M:%S.%f%z",
     )
     for fmt in formats:
         try:
@@ -722,6 +725,114 @@ def parse_jyblog_whois_api(domain: str, raw: Any) -> QueryResult:
     )
 
 
+def parse_rdap_datetime(raw: Any, action: str) -> str | None:
+    if not isinstance(raw, dict) or not isinstance(raw.get("events"), list):
+        return None
+    for event in raw["events"]:
+        if not isinstance(event, dict):
+            continue
+        if event.get("eventAction") == action:
+            return parse_display_datetime(event.get("eventDate"))
+    return None
+
+
+def parse_rdap_domain(domain: str, raw: Any, status_code: int) -> QueryResult:
+    if isinstance(raw, dict):
+        error_code = raw.get("errorCode")
+        if status_code == 404 or error_code == 404:
+            return QueryResult(
+                domain=domain,
+                status="not_found",
+                provider="rdap",
+                raw=raw,
+                registered=False,
+                expired=None,
+                error="域名未注册",
+            )
+
+        ldh_name = raw.get("ldhName") or raw.get("unicodeName")
+        if ldh_name:
+            expiration_date = parse_rdap_datetime(raw, "expiration")
+            creation_date = parse_rdap_datetime(raw, "registration")
+            updated_date = parse_rdap_datetime(raw, "last changed")
+            statuses = raw.get("status")
+            name_servers = []
+            if isinstance(raw.get("nameservers"), list):
+                for item in raw["nameservers"]:
+                    if isinstance(item, dict) and item.get("ldhName"):
+                        name_servers.append(str(item["ldhName"]).rstrip("."))
+
+            return QueryResult(
+                domain=domain,
+                status="found",
+                provider="rdap",
+                raw=raw,
+                registered=True,
+                expired=is_expired(expiration_date),
+                expiration_date=expiration_date,
+                creation_date=creation_date,
+                updated_date=updated_date,
+                domain_statuses=[str(value) for value in statuses] if isinstance(statuses, list) else None,
+                name_servers=name_servers or None,
+            )
+
+    return QueryResult(
+        domain=domain,
+        status="unknown",
+        provider="rdap",
+        raw=raw,
+        error="RDAP 返回中未找到注册状态",
+    )
+
+
+def query_rdap_domain(
+    session: requests.Session,
+    domain: str,
+    timeout: int,
+    retries: int,
+) -> QueryResult:
+    url = urljoin(RDAP_DOMAIN_URL, quote(domain))
+    for attempt in range(retries + 1):
+        try:
+            response = session.get(url, timeout=timeout)
+            try:
+                raw = response.json()
+            except ValueError as exc:
+                body = response.text.strip().replace("\n", " ")
+                preview = body[:180] if body else "<empty body>"
+                raise ProviderError(f"RDAP 未返回 JSON: {preview}") from exc
+
+            if response.status_code >= 500:
+                response.raise_for_status()
+            return parse_rdap_domain(domain, raw, response.status_code)
+        except (requests.RequestException, ProviderError) as exc:
+            if attempt < retries:
+                time.sleep(2)
+                continue
+            return QueryResult(
+                domain=domain,
+                status="error",
+                provider="rdap",
+                error=str(exc),
+            )
+
+    return QueryResult(
+        domain=domain,
+        status="error",
+        provider="rdap",
+        error="超过最大重试次数",
+    )
+
+
+def should_fallback_to_rdap(result: QueryResult) -> bool:
+    if result.status != "unknown":
+        return False
+    raw = result.raw
+    if raw in (None, "", []):
+        return True
+    return result.error in {"接口返回格式不是对象", "WHOIS 返回中未找到域名字段"}
+
+
 def query_jyblog_api_whois(
     session: requests.Session,
     domain: str,
@@ -737,7 +848,21 @@ def query_jyblog_api_whois(
                 headers=build_jyblog_api_headers(),
                 timeout=timeout,
             )
-            return parse_jyblog_whois_api(domain, raw)
+            result = parse_jyblog_whois_api(domain, raw)
+            if should_fallback_to_rdap(result):
+                rdap_result = query_rdap_domain(
+                    session=session,
+                    domain=domain,
+                    timeout=timeout,
+                    retries=retries,
+                )
+                rdap_result.raw = {
+                    "jyblog_whois_api": raw,
+                    "rdap": rdap_result.raw,
+                }
+                rdap_result.provider = "jyblog-whois-api+rdap"
+                return rdap_result
+            return result
         except (requests.RequestException, ProviderError) as exc:
             if attempt < retries:
                 time.sleep(2)

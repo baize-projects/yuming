@@ -149,21 +149,45 @@ def iter_generated_domains(
         tld if tld.startswith(".") else f".{tld}"
         for tld in tlds
     )
-    start_after_label = start_after.strip().lower().split(".", 1)[0] if start_after else None
-    passed_start = start_after_label is None
+    normalized_start_after = normalize_domain(start_after) if start_after and "." in start_after else None
+    start_after_label = start_after.strip().lower() if start_after and not normalized_start_after else None
+    passed_start = normalized_start_after is None and start_after_label is None
     for length in range(min_length, max_length + 1):
         for chars in itertools.product(alphabet, repeat=length):
             label = "".join(chars)
-            if not passed_start:
+            if not passed_start and start_after_label:
                 if label == start_after_label:
                     passed_start = True
                 continue
             for tld in normalized_tlds:
-                yield f"{label}{tld}"
+                domain = f"{label}{tld}"
+                if not passed_start:
+                    if normalized_start_after and domain == normalized_start_after:
+                        passed_start = True
+                    continue
+                yield domain
 
 
-def generated_domain_count(tlds: tuple[str, ...], min_length: int, max_length: int) -> int:
-    label_count = sum(len(GENERATED_ALPHABET) ** length for length in range(min_length, max_length + 1))
+def normalize_generated_alphabet(value: str) -> str:
+    alphabet = value.strip().lower()
+    if not alphabet:
+        raise ValueError("字符集不能为空")
+    if re.search(r"[^a-z0-9]", alphabet):
+        raise ValueError("字符集只能包含小写字母和数字")
+
+    deduped = "".join(dict.fromkeys(alphabet))
+    if not deduped:
+        raise ValueError("字符集不能为空")
+    return deduped
+
+
+def generated_domain_count(
+    tlds: tuple[str, ...],
+    min_length: int,
+    max_length: int,
+    alphabet: str = GENERATED_ALPHABET,
+) -> int:
+    label_count = sum(len(alphabet) ** length for length in range(min_length, max_length + 1))
     return label_count * len(tlds)
 
 
@@ -173,11 +197,13 @@ def build_generated_domains(
     max_length: int,
     limit: int | None,
     start_after: str | None,
+    alphabet: str = GENERATED_ALPHABET,
 ) -> list[str]:
     iterator = iter_generated_domains(
         tlds=tlds,
         min_length=min_length,
         max_length=max_length,
+        alphabet=alphabet,
         start_after=start_after,
     )
     if limit is None:
@@ -1601,6 +1627,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="生成模式的最长 label 长度，默认：4。",
     )
     parser.add_argument(
+        "--alphabet",
+        default=GENERATED_ALPHABET,
+        help="生成模式使用的字符集，只能包含 a-z0-9；纯数字可设置为 0123456789。",
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         help="生成模式或历史备案模式本次最多查询多少个候选域名；首次试跑建议设置。",
@@ -1749,13 +1780,23 @@ def main() -> int:
     )
     tlds = tuple(tld.strip().lower() for tld in args.tlds.split(",") if tld.strip())
     scan_state = load_scan_state(args.state_file) if (args.generate or args.apicn_day_source) else {}
-    state_start_after = scan_state.get("last_label") or scan_state.get("last_domain")
+    state_start_after = scan_state.get("last_domain") or scan_state.get("last_label")
     effective_start_after = args.start_after or state_start_after
     if args.apicn_day_source:
         domains = []
     elif args.generate:
+        try:
+            generated_alphabet = normalize_generated_alphabet(args.alphabet)
+        except ValueError as exc:
+            print(f"生成参数错误: {exc}")
+            return 2
         if args.limit is None:
-            total = generated_domain_count(tlds, args.min_length, args.max_length)
+            total = generated_domain_count(
+                tlds,
+                args.min_length,
+                args.max_length,
+                alphabet=generated_alphabet,
+            )
             print(
                 "生成模式需要指定 --limit 作为本次运行上限；"
                 f"当前长度范围预计候选 {total} 个。"
@@ -1768,11 +1809,13 @@ def main() -> int:
                 max_length=args.max_length,
                 limit=args.limit,
                 start_after=effective_start_after,
+                alphabet=generated_alphabet,
             )
         except ValueError as exc:
             print(f"生成参数错误: {exc}")
             return 2
     else:
+        generated_alphabet = normalize_generated_alphabet(args.alphabet)
         domains = load_domains(args.file, args.domains)
         if not args.all_tlds:
             domains = filter_domains(domains, tlds)
@@ -1798,7 +1841,7 @@ def main() -> int:
     elif args.generate:
         print(
             "生成模式: "
-            f"字符集 a-z0-9，长度 {args.min_length}-{args.max_length}，"
+            f"字符集 {generated_alphabet}，长度 {args.min_length}-{args.max_length}，"
             f"本次上限 {args.limit}"
         )
         if effective_start_after:
@@ -1916,6 +1959,7 @@ def main() -> int:
                         "last_label": domain_label(domain),
                         "min_length": args.min_length,
                         "max_length": args.max_length,
+                        "alphabet": generated_alphabet,
                         "tlds": list(tlds),
                         "limit": args.limit,
                         "scanned_domains_total": previous_scanned_total + run_scanned,
@@ -1983,6 +2027,7 @@ def main() -> int:
             "apicn_day_source": args.apicn_day_source,
             "generate_min_length": args.min_length if args.generate else None,
             "generate_max_length": args.max_length if args.generate else None,
+            "generate_alphabet": generated_alphabet if args.generate else None,
             "generate_limit": args.limit if args.generate else None,
             "generate_start_after": effective_start_after if args.generate else None,
             "run_scanned": run_scanned if (args.generate or args.apicn_day_source) else len(all_checked_results),
@@ -2003,6 +2048,7 @@ def main() -> int:
                         "last_label": domain_label(last_domain),
                         "min_length": args.min_length,
                         "max_length": args.max_length,
+                        "alphabet": generated_alphabet,
                         "tlds": list(tlds),
                         "limit": args.limit,
                         "scanned_domains_total": previous_scanned_total + run_scanned,

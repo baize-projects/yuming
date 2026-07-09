@@ -47,10 +47,36 @@ class IcpQueryTests(unittest.TestCase):
             min_length=4,
             max_length=4,
             limit=3,
-            start_after="aaaa.xyz",
+            start_after="aaaa",
         )
 
         self.assertEqual(domains, ["aaab.xyz", "aaab.icu", "aaac.xyz"])
+
+    def test_generated_domains_can_resume_after_exact_domain(self):
+        domains = icp_query.build_generated_domains(
+            tlds=(".xyz", ".icu"),
+            min_length=4,
+            max_length=4,
+            limit=3,
+            start_after="aaaa.xyz",
+        )
+
+        self.assertEqual(domains, ["aaaa.icu", "aaab.xyz", "aaab.icu"])
+
+    def test_generated_domains_can_use_numeric_alphabet(self):
+        domains = icp_query.build_generated_domains(
+            tlds=(".xyz", ".top"),
+            min_length=4,
+            max_length=4,
+            limit=5,
+            start_after=None,
+            alphabet="0123456789",
+        )
+
+        self.assertEqual(
+            domains,
+            ["0000.xyz", "0000.top", "0001.xyz", "0001.top", "0002.xyz"],
+        )
 
     def test_apicn_day_records_extract_domain_and_history_fields(self):
         records, raw_count = icp_query.parse_apicn_day_records(

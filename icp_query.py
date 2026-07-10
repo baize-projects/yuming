@@ -1358,16 +1358,25 @@ def env_int(name: str, default: int) -> int:
 
 def is_transient_provider_exception(exc: Exception) -> bool:
     text = str(exc)
+    lowered = text.lower()
     return bool(re.search(r"\b5\d\d\b", text)) or any(
-        signal in text
+        signal in lowered
         for signal in (
             "timed out",
-            "Read timed out",
-            "Receive timeout",
-            "Receive Timeout",
-            "Connection aborted",
+            "read timed out",
+            "receive timeout",
+            "connection aborted",
+            "ssl handshake failed",
+            "connectionpool",
         )
     )
+
+
+def is_transient_unknown_result(result: QueryResult) -> bool:
+    if result.status != "unknown":
+        return False
+    text = " ".join(str(value or "") for value in (result.provider, result.error))
+    return "临时失败" in text or is_transient_provider_exception(Exception(text))
 
 
 def batched(values: list[str], batch_size: int) -> Any:
@@ -1518,6 +1527,9 @@ def write_generated_scan_state(
             "last_run_scanned": run_scanned,
             "last_run_matched": matched_count,
             "stopped_by_runtime": stopped_by_runtime,
+            "stopped_by_provider": bool(getattr(args, "_stopped_by_provider_outage", False)),
+            "provider_pause_domain": getattr(args, "_provider_pause_domain", None),
+            "provider_pause_error": getattr(args, "_provider_pause_error", None),
         },
     )
 
@@ -1545,9 +1557,16 @@ def scan_generated_target_domains(
     print("WHOIS 查询接口: jyblog-whois-api")
     print(f"WHOIS 并发数: {concurrency}，备案并发数: {icp_concurrency}，批大小: {batch_size}\n")
 
-    def record_result(index: int, domain: str, result: QueryResult) -> None:
+    def record_result(index: int, domain: str, result: QueryResult) -> bool:
         nonlocal run_scanned
         print(f"[{index}/{len(domains)}] 查询: {domain}")
+        if is_transient_unknown_result(result):
+            args._stopped_by_provider_outage = True
+            args._provider_pause_domain = domain
+            args._provider_pause_error = result.error
+            print_target_result(result)
+            print("  -> 检测到接口临时故障，本轮停止；不会推进到这个域名，下次运行会重试。")
+            return False
         all_checked_results.append(result)
         if result.status == "found" and result.registered is False:
             matched_results.append(result)
@@ -1563,6 +1582,7 @@ def scan_generated_target_domains(
             matched_count=len(matched_results),
             stopped_by_runtime=False,
         )
+        return True
 
     if concurrency == 1:
         session = create_http_session()
@@ -1578,7 +1598,8 @@ def scan_generated_target_domains(
                 apihz_url=apihz_url,
                 session=session,
             )
-            record_result(index, domain, result)
+            if not record_result(index, domain, result):
+                break
 
             if index < len(domains) and args.delay > 0:
                 time.sleep(args.delay)
@@ -1606,7 +1627,8 @@ def scan_generated_target_domains(
             for offset, future in enumerate(futures):
                 domain = batch_domains[offset]
                 result = future.result()
-                record_result(batch_start + offset + 1, domain, result)
+                if not record_result(batch_start + offset + 1, domain, result):
+                    return all_checked_results, matched_results, run_scanned, stopped_by_runtime
 
             if deadline and time.monotonic() >= deadline:
                 stopped_by_runtime = True
@@ -2494,6 +2516,9 @@ def main() -> int:
             "generate_start_after": effective_start_after if args.generate else None,
             "run_scanned": run_scanned if (args.generate or args.apicn_day_source) else len(all_checked_results),
             "stopped_by_runtime": stopped_by_runtime,
+            "stopped_by_provider": bool(getattr(args, "_stopped_by_provider_outage", False)),
+            "provider_pause_domain": getattr(args, "_provider_pause_domain", None),
+            "provider_pause_error": getattr(args, "_provider_pause_error", None),
         }
         metadata.update(metadata_extra)
         if args.generate or args.apicn_day_source:
@@ -2519,6 +2544,11 @@ def main() -> int:
         print("\n查询完成！")
         print(f"扫描 {len(all_checked_results)} 个域名，命中目标 {len(matched_results)} 个。")
         print_summary(checked_summary, found_label="命中")
+        if getattr(args, "_stopped_by_provider_outage", False):
+            print(
+                "接口临时故障，已暂停本轮；"
+                f"下次将从 {getattr(args, '_provider_pause_domain', '当前域名')} 重试。"
+            )
         if args.generate or args.apicn_day_source:
             print(f"续跑状态已保存到 {args.state_file}")
             print(f"累计命中结果已保存到 {args.matches_file}")

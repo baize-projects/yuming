@@ -51,10 +51,10 @@ jobs:
             --max-length 8 \
             --limit 200000 \
             --target unregistered-with-icp \
-            --concurrency "${SCAN_CONCURRENCY:-32}" \
-            --icp-concurrency "${ICP_CONCURRENCY:-2}" \
-            --batch-size "${SCAN_BATCH_SIZE:-64}" \
-            --delay "${SCAN_BATCH_DELAY:-0.1}" \
+            --concurrency "${SCAN_CONCURRENCY:-8}" \
+            --icp-concurrency "${ICP_CONCURRENCY:-1}" \
+            --batch-size "${SCAN_BATCH_SIZE:-8}" \
+            --delay "${SCAN_BATCH_DELAY:-2}" \
             --timeout 20 \
             --retries 1 \
             --icp-timeout "${ICP_TIMEOUT:-10}" \

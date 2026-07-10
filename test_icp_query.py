@@ -146,6 +146,71 @@ class IcpQueryTests(unittest.TestCase):
             self.assertEqual(state["icp_retries"], 0)
             self.assertEqual(state["batch_size"], 2)
 
+    def test_generated_scan_pauses_before_transient_unknown_without_advancing_state(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "state.json"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "last_domain": "00829.top",
+                        "scanned_domains_total": 234,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = Namespace(
+                state_file=str(state_path),
+                target=icp_query.TARGET_UNREGISTERED_WITH_ICP,
+                min_length=4,
+                max_length=4,
+                limit=3,
+                concurrency=1,
+                batch_size=1,
+                icp_concurrency=1,
+                icp_timeout=10,
+                icp_retries=0,
+                timeout=1,
+                retries=0,
+                delay=0,
+                icp_provider="jyblog-api",
+                apihz_id="id",
+                apihz_key="key",
+            )
+
+            def fake_query(domain, *_args, **_kwargs):
+                return icp_query.QueryResult(
+                    domain=domain,
+                    status="unknown",
+                    provider="jyblog-whois-api+jyblog-api",
+                    registered=False,
+                    error=(
+                        "备案接口临时失败: HTTPSConnectionPool(host='who.jyblog.com', "
+                        "port=443): Read timed out. (read timeout=10)"
+                    ),
+                )
+
+            with patch("icp_query.query_unregistered_with_icp_target", side_effect=fake_query):
+                checked, matched, scanned, stopped = icp_query.scan_generated_target_domains(
+                    args=args,
+                    domains=["00830.xyz", "00830.icu"],
+                    tlds=(".xyz", ".icu", ".top"),
+                    generated_alphabet="0123456789",
+                    apihz_url="",
+                    scan_state={"scanned_domains_total": 234},
+                    deadline=None,
+                )
+
+            self.assertEqual(checked, [])
+            self.assertEqual(matched, [])
+            self.assertEqual(scanned, 0)
+            self.assertFalse(stopped)
+            self.assertTrue(args._stopped_by_provider_outage)
+            self.assertEqual(args._provider_pause_domain, "00830.xyz")
+
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            self.assertEqual(state["last_domain"], "00829.top")
+            self.assertEqual(state["scanned_domains_total"], 234)
+
     def test_empty_integer_env_values_fall_back_to_defaults(self):
         with patch.dict(
             "icp_query.os.environ",
@@ -580,6 +645,22 @@ class IcpQueryTests(unittest.TestCase):
         with patch(
             "icp_query.request_json_post",
             side_effect=icp_query.requests.HTTPError("524 Server Error: Receive timeout from origin"),
+        ):
+            result = icp_query.query_jyblog_api_whois(
+                FakeSession([]),
+                "03382.top",
+                timeout=1,
+                retries=0,
+            )
+
+        self.assertEqual(result.status, "unknown")
+        self.assertEqual(result.provider, "jyblog-whois-api")
+        self.assertIn("WHOIS 接口临时失败", result.error)
+
+    def test_jyblog_whois_api_treats_525_as_transient_unknown(self):
+        with patch(
+            "icp_query.request_json_post",
+            side_effect=icp_query.requests.HTTPError("525 Server Error: SSL handshake failed"),
         ):
             result = icp_query.query_jyblog_api_whois(
                 FakeSession([]),

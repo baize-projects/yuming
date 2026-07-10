@@ -905,6 +905,13 @@ def query_jyblog_api_whois(
             if attempt < retries:
                 time.sleep(2)
                 continue
+            if is_transient_provider_exception(exc):
+                return QueryResult(
+                    domain=domain,
+                    status="unknown",
+                    provider="jyblog-whois-api",
+                    error=f"WHOIS 接口临时失败: {exc}",
+                )
             return QueryResult(
                 domain=domain,
                 status="error",

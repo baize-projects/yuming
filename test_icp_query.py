@@ -560,6 +560,38 @@ class IcpQueryTests(unittest.TestCase):
         self.assertFalse(result.registered)
         self.assertEqual(result.error, "域名未注册")
 
+    def test_jyblog_whois_api_treats_522_as_transient_unknown(self):
+        with patch(
+            "icp_query.request_json_post",
+            side_effect=icp_query.requests.HTTPError("522 Server Error: Connect origin timed out"),
+        ):
+            result = icp_query.query_jyblog_api_whois(
+                FakeSession([]),
+                "03382.top",
+                timeout=1,
+                retries=0,
+            )
+
+        self.assertEqual(result.status, "unknown")
+        self.assertEqual(result.provider, "jyblog-whois-api")
+        self.assertIn("WHOIS 接口临时失败", result.error)
+
+    def test_jyblog_whois_api_treats_524_as_transient_unknown(self):
+        with patch(
+            "icp_query.request_json_post",
+            side_effect=icp_query.requests.HTTPError("524 Server Error: Receive timeout from origin"),
+        ):
+            result = icp_query.query_jyblog_api_whois(
+                FakeSession([]),
+                "03382.top",
+                timeout=1,
+                retries=0,
+            )
+
+        self.assertEqual(result.status, "unknown")
+        self.assertEqual(result.provider, "jyblog-whois-api")
+        self.assertIn("WHOIS 接口临时失败", result.error)
+
     def test_rdap_detects_unregistered_domain_from_404(self):
         result = icp_query.parse_rdap_domain(
             "0145.top",

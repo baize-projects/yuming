@@ -1,8 +1,8 @@
 {
   "mode": "generate",
   "target": "unregistered-with-icp",
-  "last_domain": "00751.top",
-  "last_label": "00751",
+  "last_domain": "01893.xyz",
+  "last_label": "01893",
   "min_length": 4,
   "max_length": 8,
   "alphabet": "0123456789",
@@ -12,14 +12,17 @@
     ".top"
   ],
   "limit": 200000,
-  "concurrency": 32,
-  "icp_concurrency": 2,
+  "concurrency": 8,
+  "icp_concurrency": 1,
   "icp_timeout": 10,
   "icp_retries": 0,
-  "batch_size": 64,
-  "scanned_domains_total": 32256,
-  "last_run_scanned": 12672,
+  "batch_size": 8,
+  "scanned_domains_total": 35680,
+  "last_run_scanned": 3424,
   "last_run_matched": 0,
   "stopped_by_runtime": true,
-  "updated_at": "2026-07-10T12:48:36"
+  "stopped_by_provider": false,
+  "provider_pause_domain": null,
+  "provider_pause_error": null,
+  "updated_at": "2026-07-10T18:26:12"
 }

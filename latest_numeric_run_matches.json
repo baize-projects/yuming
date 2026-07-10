@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-10T22:00:09",
+  "generated_at": "2026-07-10T23:49:08",
   "summary": {
     "total": 0,
     "found": 0,
@@ -15,9 +15,9 @@
     "icp_provider": "jyblog-api",
     "scanned_domains": 200000,
     "checked_summary": {
-      "total": 35,
+      "total": 1049,
       "found": 0,
-      "not_found": 35,
+      "not_found": 1049,
       "error": 0,
       "unknown": 0
     },
@@ -28,11 +28,11 @@
     "generate_max_length": 8,
     "generate_alphabet": "0123456789",
     "generate_limit": 200000,
-    "generate_start_after": "03870.xyz",
-    "run_scanned": 35,
+    "generate_start_after": "03881.top",
+    "run_scanned": 1049,
     "stopped_by_runtime": false,
     "stopped_by_provider": true,
-    "provider_pause_domain": "03882.xyz",
-    "provider_pause_error": "备案接口临时失败: HTTPSConnectionPool(host='who.jyblog.com', port=443): Read timed out. (read timeout=10)"
+    "provider_pause_domain": "04231.top",
+    "provider_pause_error": "WHOIS 不确定，备案补查结果为 unknown: 备案接口临时失败: HTTPSConnectionPool(host='who.jyblog.com', port=443): Read timed out. (read timeout=10)"
   }
 }

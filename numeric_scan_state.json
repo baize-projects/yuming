@@ -1,8 +1,8 @@
 {
   "mode": "generate",
   "target": "unregistered-with-icp",
-  "last_domain": "05943.icu",
-  "last_label": "05943",
+  "last_domain": "06488.top",
+  "last_label": "06488",
   "min_length": 4,
   "max_length": 8,
   "alphabet": "0123456789",
@@ -17,12 +17,12 @@
   "icp_timeout": 10,
   "icp_retries": 0,
   "batch_size": 8,
-  "scanned_domains_total": 47831,
-  "last_run_scanned": 2456,
+  "scanned_domains_total": 49467,
+  "last_run_scanned": 1636,
   "last_run_matched": 0,
-  "stopped_by_runtime": true,
-  "stopped_by_provider": false,
-  "provider_pause_domain": null,
-  "provider_pause_error": null,
-  "updated_at": "2026-07-11T05:42:01"
+  "stopped_by_runtime": false,
+  "stopped_by_provider": true,
+  "provider_pause_domain": "06489.xyz",
+  "provider_pause_error": "备案接口临时失败: HTTPSConnectionPool(host='who.jyblog.com', port=443): Read timed out. (read timeout=10)",
+  "updated_at": "2026-07-11T06:25:50"
 }

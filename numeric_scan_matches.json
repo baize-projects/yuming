@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-12T11:39:04",
+  "generated_at": "2026-07-12T13:41:30",
   "summary": {
     "total": 0,
     "found": 0,
@@ -14,9 +14,9 @@
     "icp_provider": "jyblog-api",
     "scanned_domains": 200000,
     "checked_summary": {
-      "total": 31,
+      "total": 1181,
       "found": 0,
-      "not_found": 31,
+      "not_found": 1181,
       "error": 0,
       "unknown": 0
     },
@@ -27,12 +27,12 @@
     "generate_max_length": 8,
     "generate_alphabet": "0123456789",
     "generate_limit": 200000,
-    "generate_start_after": "16425.xyz",
-    "run_scanned": 31,
+    "generate_start_after": "16435.icu",
+    "run_scanned": 1181,
     "stopped_by_runtime": false,
     "stopped_by_provider": true,
-    "provider_pause_domain": "16435.top",
-    "provider_pause_error": "WHOIS 不确定，备案补查结果为 unknown: 备案接口临时失败: 522 Server Error: Connect origin timed out for url: https://who.jyblog.com/api/beian/"
+    "provider_pause_domain": "16829.icu",
+    "provider_pause_error": "备案接口临时失败: 525 Server Error: EO errCode : SSL handshake failed for url: https://who.jyblog.com/api/beian/"
   },
   "results": []
 }

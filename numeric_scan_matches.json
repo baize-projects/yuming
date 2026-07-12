@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-12T20:23:27",
+  "generated_at": "2026-07-12T22:31:58",
   "summary": {
     "total": 0,
     "found": 0,
@@ -14,9 +14,9 @@
     "icp_provider": "jyblog-api",
     "scanned_domains": 200000,
     "checked_summary": {
-      "total": 34,
+      "total": 3057,
       "found": 0,
-      "not_found": 34,
+      "not_found": 3057,
       "error": 0,
       "unknown": 0
     },
@@ -27,11 +27,11 @@
     "generate_max_length": 8,
     "generate_alphabet": "0123456789",
     "generate_limit": 200000,
-    "generate_start_after": "19422.icu",
-    "run_scanned": 34,
+    "generate_start_after": "19433.top",
+    "run_scanned": 3057,
     "stopped_by_runtime": false,
     "stopped_by_provider": true,
-    "provider_pause_domain": "19434.xyz",
+    "provider_pause_domain": "20453.xyz",
     "provider_pause_error": "备案接口临时失败: HTTPSConnectionPool(host='who.jyblog.com', port=443): Read timed out. (read timeout=10)"
   },
   "results": []

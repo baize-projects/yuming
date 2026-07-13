@@ -1,8 +1,8 @@
 {
   "mode": "generate",
   "target": "unregistered-with-icp",
-  "last_domain": "20452.top",
-  "last_label": "20452",
+  "last_domain": "21042.icu",
+  "last_label": "21042",
   "min_length": 4,
   "max_length": 8,
   "alphabet": "0123456789",
@@ -17,12 +17,12 @@
   "icp_timeout": 10,
   "icp_retries": 0,
   "batch_size": 8,
-  "scanned_domains_total": 91359,
-  "last_run_scanned": 3057,
+  "scanned_domains_total": 93128,
+  "last_run_scanned": 1769,
   "last_run_matched": 0,
   "stopped_by_runtime": false,
   "stopped_by_provider": true,
-  "provider_pause_domain": "20453.xyz",
-  "provider_pause_error": "备案接口临时失败: HTTPSConnectionPool(host='who.jyblog.com', port=443): Read timed out. (read timeout=10)",
-  "updated_at": "2026-07-12T22:31:58"
+  "provider_pause_domain": "21042.top",
+  "provider_pause_error": "WHOIS 不确定，备案补查结果为 unknown: 备案接口临时失败: HTTPSConnectionPool(host='who.jyblog.com', port=443): Read timed out. (read timeout=10)",
+  "updated_at": "2026-07-13T00:02:31"
 }

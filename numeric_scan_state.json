@@ -1,8 +1,8 @@
 {
   "mode": "generate",
   "target": "unregistered-with-icp",
-  "last_domain": "21254.xyz",
-  "last_label": "21254",
+  "last_domain": "22190.xyz",
+  "last_label": "22190",
   "min_length": 4,
   "max_length": 8,
   "alphabet": "0123456789",
@@ -17,12 +17,12 @@
   "icp_timeout": 10,
   "icp_retries": 0,
   "batch_size": 8,
-  "scanned_domains_total": 93763,
-  "last_run_scanned": 20,
+  "scanned_domains_total": 96571,
+  "last_run_scanned": 2808,
   "last_run_matched": 0,
-  "stopped_by_runtime": false,
-  "stopped_by_provider": true,
-  "provider_pause_domain": "21254.icu",
-  "provider_pause_error": "备案接口临时失败: 522 Server Error: Connect origin timed out for url: https://who.jyblog.com/api/beian/",
-  "updated_at": "2026-07-13T06:14:23"
+  "stopped_by_runtime": true,
+  "stopped_by_provider": false,
+  "provider_pause_domain": null,
+  "provider_pause_error": null,
+  "updated_at": "2026-07-13T11:39:05"
 }

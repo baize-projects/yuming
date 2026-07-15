@@ -1,8 +1,8 @@
 {
   "mode": "generate",
   "target": "unregistered-with-icp",
-  "last_domain": "42886.icu",
-  "last_label": "42886",
+  "last_domain": "43496.xyz",
+  "last_label": "43496",
   "min_length": 4,
   "max_length": 8,
   "alphabet": "0123456789",
@@ -17,12 +17,12 @@
   "icp_timeout": 10,
   "icp_retries": 0,
   "batch_size": 8,
-  "scanned_domains_total": 158660,
-  "last_run_scanned": 2280,
+  "scanned_domains_total": 160489,
+  "last_run_scanned": 1829,
   "last_run_matched": 0,
-  "stopped_by_runtime": true,
-  "stopped_by_provider": false,
-  "provider_pause_domain": null,
-  "provider_pause_error": null,
-  "updated_at": "2026-07-15T07:37:29"
+  "stopped_by_runtime": false,
+  "stopped_by_provider": true,
+  "provider_pause_domain": "43496.icu",
+  "provider_pause_error": "备案接口临时失败: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))",
+  "updated_at": "2026-07-15T08:50:00"
 }

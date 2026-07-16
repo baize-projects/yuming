@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-15T23:51:06",
+  "generated_at": "2026-07-16T03:20:54",
   "summary": {
     "total": 0,
     "found": 0,
@@ -15,9 +15,9 @@
     "icp_provider": "jyblog-api",
     "scanned_domains": 200000,
     "checked_summary": {
-      "total": 1226,
+      "total": 3152,
       "found": 0,
-      "not_found": 1226,
+      "not_found": 3152,
       "error": 0,
       "unknown": 0
     },
@@ -28,11 +28,11 @@
     "generate_max_length": 8,
     "generate_alphabet": "0123456789",
     "generate_limit": 200000,
-    "generate_start_after": "50641.xyz",
-    "run_scanned": 1226,
-    "stopped_by_runtime": false,
-    "stopped_by_provider": true,
-    "provider_pause_domain": "51050.xyz",
-    "provider_pause_error": "备案接口临时失败: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))"
+    "generate_start_after": "51049.top",
+    "run_scanned": 3152,
+    "stopped_by_runtime": true,
+    "stopped_by_provider": false,
+    "provider_pause_domain": null,
+    "provider_pause_error": null
   }
 }

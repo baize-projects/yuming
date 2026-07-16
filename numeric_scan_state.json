@@ -1,8 +1,8 @@
 {
   "mode": "generate",
   "target": "unregistered-with-icp",
-  "last_domain": "53029.top",
-  "last_label": "53029",
+  "last_domain": "53568.top",
+  "last_label": "53568",
   "min_length": 4,
   "max_length": 8,
   "alphabet": "0123456789",
@@ -17,12 +17,12 @@
   "icp_timeout": 10,
   "icp_retries": 0,
   "batch_size": 8,
-  "scanned_domains_total": 189090,
-  "last_run_scanned": 75,
+  "scanned_domains_total": 190707,
+  "last_run_scanned": 1617,
   "last_run_matched": 0,
   "stopped_by_runtime": false,
   "stopped_by_provider": true,
-  "provider_pause_domain": "53030.xyz",
-  "provider_pause_error": "备案接口临时失败: HTTPSConnectionPool(host='who.jyblog.com', port=443): Read timed out. (read timeout=10)",
-  "updated_at": "2026-07-16T10:58:37"
+  "provider_pause_domain": "53569.xyz",
+  "provider_pause_error": "备案接口临时失败: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))",
+  "updated_at": "2026-07-16T12:41:06"
 }

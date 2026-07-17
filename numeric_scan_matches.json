@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-17T12:40:42",
+  "generated_at": "2026-07-17T13:23:32",
   "summary": {
     "total": 0,
     "found": 0,
@@ -14,9 +14,9 @@
     "icp_provider": "jyblog-api",
     "scanned_domains": 200000,
     "checked_summary": {
-      "total": 2288,
+      "total": 59,
       "found": 0,
-      "not_found": 2288,
+      "not_found": 59,
       "error": 0,
       "unknown": 0
     },
@@ -27,11 +27,11 @@
     "generate_max_length": 8,
     "generate_alphabet": "0123456789",
     "generate_limit": 200000,
-    "generate_start_after": "61121.icu",
-    "run_scanned": 2288,
+    "generate_start_after": "61884.xyz",
+    "run_scanned": 59,
     "stopped_by_runtime": false,
     "stopped_by_provider": true,
-    "provider_pause_domain": "61884.icu",
+    "provider_pause_domain": "61904.xyz",
     "provider_pause_error": "备案接口临时失败: 522 Server Error: Connect origin timed out for url: https://who.jyblog.com/api/beian/"
   },
   "results": []

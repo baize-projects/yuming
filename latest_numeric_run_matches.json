@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-17T11:09:38",
+  "generated_at": "2026-07-17T12:40:42",
   "summary": {
     "total": 0,
     "found": 0,
@@ -15,9 +15,9 @@
     "icp_provider": "jyblog-api",
     "scanned_domains": 200000,
     "checked_summary": {
-      "total": 1091,
+      "total": 2288,
       "found": 0,
-      "not_found": 1091,
+      "not_found": 2288,
       "error": 0,
       "unknown": 0
     },
@@ -28,11 +28,11 @@
     "generate_max_length": 8,
     "generate_alphabet": "0123456789",
     "generate_limit": 200000,
-    "generate_start_after": "60757.top",
-    "run_scanned": 1091,
+    "generate_start_after": "61121.icu",
+    "run_scanned": 2288,
     "stopped_by_runtime": false,
     "stopped_by_provider": true,
-    "provider_pause_domain": "61121.top",
-    "provider_pause_error": "WHOIS 不确定，备案补查结果为 unknown: 备案接口临时失败: 522 Server Error: Connect origin timed out for url: https://who.jyblog.com/api/beian/"
+    "provider_pause_domain": "61884.icu",
+    "provider_pause_error": "备案接口临时失败: 522 Server Error: Connect origin timed out for url: https://who.jyblog.com/api/beian/"
   }
 }

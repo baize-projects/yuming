@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-18T00:24:45",
+  "generated_at": "2026-07-18T03:08:15",
   "summary": {
     "total": 0,
     "found": 0,
@@ -14,9 +14,9 @@
     "icp_provider": "jyblog-api",
     "scanned_domains": 200000,
     "checked_summary": {
-      "total": 3536,
+      "total": 3288,
       "found": 0,
-      "not_found": 3536,
+      "not_found": 3288,
       "error": 0,
       "unknown": 0
     },
@@ -27,8 +27,8 @@
     "generate_max_length": 8,
     "generate_alphabet": "0123456789",
     "generate_limit": 200000,
-    "generate_start_after": "68159.xyz",
-    "run_scanned": 3536,
+    "generate_start_after": "69337.top",
+    "run_scanned": 3288,
     "stopped_by_runtime": true,
     "stopped_by_provider": false,
     "provider_pause_domain": null,

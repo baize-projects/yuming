@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-18T16:04:07",
+  "generated_at": "2026-07-18T18:31:35",
   "summary": {
     "total": 0,
     "found": 0,
@@ -14,9 +14,9 @@
     "icp_provider": "jyblog-api",
     "scanned_domains": 200000,
     "checked_summary": {
-      "total": 491,
+      "total": 3480,
       "found": 0,
-      "not_found": 491,
+      "not_found": 3480,
       "error": 0,
       "unknown": 0
     },
@@ -27,12 +27,12 @@
     "generate_max_length": 8,
     "generate_alphabet": "0123456789",
     "generate_limit": 200000,
-    "generate_start_after": "76327.top",
-    "run_scanned": 491,
-    "stopped_by_runtime": false,
-    "stopped_by_provider": true,
-    "provider_pause_domain": "76491.top",
-    "provider_pause_error": "WHOIS 不确定，备案补查结果为 unknown: 备案接口临时失败: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))"
+    "generate_start_after": "76491.icu",
+    "run_scanned": 3480,
+    "stopped_by_runtime": true,
+    "stopped_by_provider": false,
+    "provider_pause_domain": null,
+    "provider_pause_error": null
   },
   "results": []
 }

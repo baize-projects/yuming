@@ -1,8 +1,8 @@
 {
   "mode": "generate",
   "target": "unregistered-with-icp",
-  "last_domain": "78987.icu",
-  "last_label": "78987",
+  "last_domain": "80339.icu",
+  "last_label": "80339",
   "min_length": 4,
   "max_length": 8,
   "alphabet": "0123456789",
@@ -17,12 +17,12 @@
   "icp_timeout": 10,
   "icp_retries": 0,
   "batch_size": 8,
-  "scanned_domains_total": 266963,
-  "last_run_scanned": 4008,
+  "scanned_domains_total": 271019,
+  "last_run_scanned": 4056,
   "last_run_matched": 0,
   "stopped_by_runtime": true,
   "stopped_by_provider": false,
   "provider_pause_domain": null,
   "provider_pause_error": null,
-  "updated_at": "2026-07-18T19:58:59"
+  "updated_at": "2026-07-18T22:47:20"
 }

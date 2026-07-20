@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-20T21:03:28",
+  "generated_at": "2026-07-20T22:00:11",
   "summary": {
     "total": 0,
     "found": 0,
@@ -14,9 +14,9 @@
     "icp_provider": "jyblog-api",
     "scanned_domains": 200000,
     "checked_summary": {
-      "total": 660,
+      "total": 96,
       "found": 0,
-      "not_found": 660,
+      "not_found": 96,
       "error": 0,
       "unknown": 0
     },
@@ -27,12 +27,12 @@
     "generate_max_length": 8,
     "generate_alphabet": "0123456789",
     "generate_limit": 200000,
-    "generate_start_after": "97660.top",
-    "run_scanned": 660,
+    "generate_start_after": "97880.top",
+    "run_scanned": 96,
     "stopped_by_runtime": false,
     "stopped_by_provider": true,
-    "provider_pause_domain": "97881.xyz",
-    "provider_pause_error": "备案接口临时失败: 522 Server Error: Connect origin timed out for url: https://who.jyblog.com/api/beian/"
+    "provider_pause_domain": "97913.xyz",
+    "provider_pause_error": "备案接口临时失败: HTTPSConnectionPool(host='who.jyblog.com', port=443): Read timed out. (read timeout=10)"
   },
   "results": []
 }

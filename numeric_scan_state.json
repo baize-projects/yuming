@@ -1,8 +1,8 @@
 {
   "mode": "generate",
   "target": "unregistered-with-icp",
-  "last_domain": "003284.xyz",
-  "last_label": "003284",
+  "last_domain": "003288.top",
+  "last_label": "003288",
   "min_length": 4,
   "max_length": 8,
   "alphabet": "0123456789",
@@ -17,12 +17,12 @@
   "icp_timeout": 10,
   "icp_retries": 0,
   "batch_size": 8,
-  "scanned_domains_total": 339853,
-  "last_run_scanned": 367,
+  "scanned_domains_total": 339867,
+  "last_run_scanned": 14,
   "last_run_matched": 0,
   "stopped_by_runtime": false,
   "stopped_by_provider": true,
-  "provider_pause_domain": "003284.icu",
-  "provider_pause_error": "备案接口临时失败: HTTPSConnectionPool(host='who.jyblog.com', port=443): Read timed out. (read timeout=10)",
-  "updated_at": "2026-07-21T13:49:39"
+  "provider_pause_domain": "003289.xyz",
+  "provider_pause_error": "备案接口临时失败: 522 Server Error: Connect origin timed out for url: https://who.jyblog.com/api/beian/",
+  "updated_at": "2026-07-21T15:23:24"
 }
